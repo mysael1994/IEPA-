@@ -1,0 +1,276 @@
+#dados IDEB
+#install.packages("basedosdados")
+library("basedosdados")
+library(dplyr)
+
+
+#query <- bdplyr("br_bd_diretorios_brasil.municipio")
+set_billing_id("ideb-412717")
+
+
+#Brasil; br_inep_ideb.brasil
+#por UF br_inep_ideb.uf
+# por regiao: br_inep_ideb.regiao
+#Por Municipio: br_inep_ideb.municipio
+#por escolas: br_inep_ideb.escola
+#query <- bdplyr("br_inep_ideb.escola")
+
+#ideb_2023 <- basedosdados::read_sql('SELECT ano, sigla_uf, id_municipio, id_escola,
+#rede, ensino, anos_escolares, taxa_aprovacao, indicador_rendimento, nota_saeb_matematica,
+#nota_saeb_lingua_portuguesa, nota_saeb_media_padronizada, ideb, projecao	
+#FROM `basedosdados.br_inep_ideb.escola` WHERE ano = 2023') #
+
+
+ideb_2023 <- basedosdados::read_sql('SELECT * 
+                                    FROM `basedosdados.br_inep_ideb.escola` WHERE ano = 2023') #
+
+
+
+#SAEB_2023 <- basedosdados::read_sql('SELECT ano, sigla_uf,rede , id_municipio,
+#disciplina, serie, media, nivel_0	
+#FROM `basedosdados.br_inep_saeb.municipio` WHERE ano = 2023') #
+
+
+IDEB_ES <- basedosdados::read_sql("
+SELECT *
+FROM `basedosdados.br_inep_ideb.escola`
+WHERE rede = 'municipal'
+  AND sigla_uf = 'ES'
+")
+
+
+length(unique(IDEB_ES$id_municipio))
+
+medideb <- IDEB_ES %>%
+  group_by(ano, id_municipio, anos_escolares) %>%
+  summarize(
+    media   = round(mean(ideb, na.rm = TRUE), 1),
+    pquan   = round(quantile(ideb, 0.25, na.rm = TRUE), 1),
+    tquan   = round(quantile(ideb, 0.75, na.rm = TRUE), 1),
+    desvio  = round(sd(ideb, na.rm = TRUE), 1),
+    min     = round(min(ideb, na.rm = TRUE), 1),
+    max     = round(max(ideb, na.rm = TRUE), 1),
+    .groups = "drop"
+  )
+
+
+ideb_MUNPRI <- medideb %>% 
+  filter(id_municipio %in% c(3205309, 3205002, 3205200, 3201308, 3203205)) %>% 
+  select(ano, id_municipio, anos_escolares, media)
+
+#write_xlsx(ideb_MUNPRI, "medideb_MUNIC.xlsx")
+
+
+#media do Estado por ano
+medidebESTADO <- IDEB_ES %>%
+  group_by(ano, anos_escolares) %>%
+  summarize(
+    media   = round(mean(ideb, na.rm = TRUE), 1),
+    pquan   = round(quantile(ideb, 0.25, na.rm = TRUE), 1),
+    tquan   = round(quantile(ideb, 0.75, na.rm = TRUE), 1),
+    desvio  = round(sd(ideb, na.rm = TRUE), 1),
+    min     = round(min(ideb, na.rm = TRUE), 1),
+    max     = round(max(ideb, na.rm = TRUE), 1),
+    .groups = "drop"
+  ) %>% filter(anos_escolares != "todos (1-4)")
+
+
+library(writexl)
+getwd()
+#write_xlsx(medidebESTADO, "medideb_estado.xlsx")
+
+
+
+
+SAEB_2023 <- filter(ideb_2023, rede =="municipal" & sigla_uf == "ES")
+
+
+
+
+
+table(SAEB_2023$rede)
+
+
+View(Sobral)
+Sobral <- SAEB_2023 %>% filter(id_municipio ==3205309, rede =="municipal", 
+                               ensino =="fundamental" ) #%>% #anos_escolares =="finais (6-9)"
+
+
+Sobral <- Sobral %>% filter(anos_escolares =="finais (6-9)") #%>% #
+
+length(unique(Sobral$id_escola))
+  #select(id_escola, ideb)
+#View(Sobral)
+colnames(ideb_2022)
+l <- Sobral %>% summarize( 
+          media = mean(ideb, na.rm = T),
+          pquan = quantile(ideb, 0.25, na.rm = T),
+          tquan = quantile(ideb, 0.75, na.rm = T),
+          desvio = sd(ideb, na.rm = T),
+          min = min(ideb, na.rm = T),
+          max = max(ideb, na.rm = T))
+
+#criando um grafico de disperção 
+
+library(ggplot2)
+colnames(Sobral)
+grafico <- ggplot(Sobral, aes(x = id_escola, y = ideb)) +
+  geom_point() +  # Adiciona pontos ao gráfico
+  geom_hline(yintercept = mean(Sobral$ideb, na.rm = T), linetype = "dashed", color = "red") +  # Adiciona a linha da média
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))  # Rotaciona os rótulos do eixo x para melhor visualização
+print(grafico)
+
+#OUTRA FORMAR
+media_ideb <- mean(Sobral$ideb, na.rm = T)
+
+grafico1 <- ggplot(Sobral, aes(x =  id_escola, y = ideb)) +
+  geom_point() +  # Adiciona pontos ao gráfico
+  theme_bw() +
+  geom_hline(yintercept = media_ideb, linetype = "dashed", color = "red") +  # Adiciona a linha da média
+  annotate("text", x = Inf, y = media_ideb, label = paste("Média =", round(media_ideb, 2)), vjust = 1.5, hjust = 1) +  # Adiciona rótulo com o valor da média
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + # Rotaciona os rótulos do eixo x para melhor visualização
+  theme(axis.text.x = element_blank(),  # Remove os rótulos do eixo x
+        axis.title.x = element_blank())  # Remove o título do eixo x
+
+
+# Exibe o gráfico
+print(grafico1)
+
+
+#pegando dados do censo escolar 
+
+set_billing_id("mahin-dados")
+
+
+
+
+Escola_2022 <- basedosdados::read_sql('SELECT sigla_uf,ano,id_municipio,id_escola,rede, quantidade_matricula_nao_declarada,quantidade_matricula_branca,
+quantidade_matricula_preta, quantidade_matricula_parda, quantidade_matricula_amarela, quantidade_matricula_indigena, rede,
+etapa_ensino_fundamental, etapa_ensino_fundamental_anos_iniciais, etapa_ensino_fundamental_anos_finais
+FROM `basedosdados.br_inep_censo_escolar.escola` WHERE sigla_uf = "ES" AND ano = 2023') #WHERE sigla_uf = "CE" AND ano =2022'
+
+#filtro 
+sobral <- Escola_2022 %>% dplyr::filter( etapa_ensino_fundamental==1, id_municipio==3205309,
+                                         rede==3)
+
+
+sobral <- sobral %>%
+  mutate(
+    quantidade_matricula_branca = as.numeric(quantidade_matricula_branca),
+    quantidade_matricula_preta = as.numeric(quantidade_matricula_preta),
+    quantidade_matricula_parda = as.numeric(quantidade_matricula_parda),
+    quantidade_matricula_amarela = as.numeric(quantidade_matricula_amarela),
+    quantidade_matricula_indigena = as.numeric(quantidade_matricula_indigena),
+    ano = as.numeric(ano)
+  )
+
+
+sobral <- sobral %>% mutate(total_m = quantidade_matricula_branca+quantidade_matricula_preta+
+                              quantidade_matricula_parda+quantidade_matricula_amarela+quantidade_matricula_indigena)
+
+
+sobral <- sobral %>% mutate(prop.branco = (quantidade_matricula_branca/total_m),
+                            prop.pardo = (quantidade_matricula_parda/total_m),
+                            prop.preto = (quantidade_matricula_preta/total_m),
+                            prop.amarelo = (quantidade_matricula_amarela/total_m),
+                            prop.indigena = (quantidade_matricula_indigena/total_m),
+                            prop.negro = ((quantidade_matricula_parda+quantidade_matricula_preta)/total_m)
+) 
+#library(tidyr)
+colnames(sobral)
+sobral  <- sobral %>% pivot_longer(cols = c(prop.branco, prop.pardo, prop.preto, 
+                                            prop.amarelo, prop.indigena, prop.negro), 
+                                   names_to = "cor", values_to = "prop.cor" )
+
+sobral <- sobral %>% select(ano, id_escola, cor, prop.cor)
+#View(sobral)
+
+n_sobral <- sobral %>% dplyr::filter(cor %in% "prop.negro")
+
+#juntar coom dados do ideb
+colnames(n_sobral)
+str(Sobral)
+#Sobral$id_escola <- as.numeric(Sobral$id_escola)
+#n_sobral$id_escola <- as.numeric(n_sobral$id_escola)
+
+n_sobral_ideb <- n_sobral %>% merge(Sobral, n_sobral, by.x = "id_escola", by.y = "id_escola", all.x = T)
+
+n_sobral_ideb <- na.omit(n_sobral_ideb)
+#View(n_sobral_ideb)
+
+n_sobral_ideb <- n_sobral_ideb %>%
+  mutate(prop.cor = prop.cor*100)
+#View(n_sobral_ideb)
+
+#OUTRA FORMAR
+media_ideb <- median(n_sobral_ideb$ideb) #irei trabalhar com a mediana aqui tbm
+colnames(n_sobral_ideb)
+
+#View(n_sobral_ideb)
+grafico2 <- ggplot(n_sobral_ideb, aes(x =  id_escola, y = prop.cor)) +
+  geom_point() +  # Adiciona pontos ao gráfico
+  theme_bw() +
+  geom_hline(yintercept = media_ideb, linetype = "dashed", color = "red") +  # Adiciona a linha da média
+  annotate("text", x = Inf, y = media_ideb, label = paste("mediana Negros =", round(media_ideb, 2)), vjust = 1.5, hjust = 1) +  # Adiciona rótulo com o valor da média
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + # Rotaciona os rótulos do eixo x para melhor visualização
+  theme(axis.text.x = element_blank(),  # Remove os rótulos do eixo x
+        axis.title.x = element_blank())  # Remove o título do eixo x
+print(grafico2)
+
+
+#continuar daqui
+
+n_sobral_ideb <- n_sobral_ideb %>% mutate(acimamediana = ifelse(prop.cor > median(n_sobral_ideb$prop.cor), 1,0)) 
+n_sobral_ideb$acimamediana <- as.factor(n_sobral_ideb$acimamediana) 
+
+
+
+grafico2 <- ggplot(n_sobral_ideb, aes(x = id_escola, y = ideb, color = acimamediana)) +
+  geom_point() +
+  theme_bw() +
+  geom_hline(yintercept = media_ideb, linetype = "dashed", color = "red") +
+  annotate("text", x = Inf, y = media_ideb, label = paste("Mediana nota IDEB =", round(media_ideb, 2)), vjust = 1.5, hjust = 1) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank()) +
+  scale_color_manual(name = "",
+                     values = c("0" = "blue", "1" = "red"),
+                     labels = c("0" = "Abaixo da mediana", "1" = "Acima da mediana")) +
+  labs(color = " % de Negros") 
+
+
+print(grafico2)
+
+
+#acima da media 
+#View(n_sobral_ideb)
+n_acima <- n_sobral_ideb %>% dplyr::filter(acimamediana ==0)
+
+media_acima <- median(n_acima$ideb)
+
+#grafico
+grafico4 <- ggplot(n_acima, aes(x = id_escola, y = ideb, color = acimamediana)) +
+  geom_point() +
+  theme_bw() +
+  geom_hline(yintercept = media_acima, linetype = "dashed", color = "red") +
+  annotate("text", x = Inf, y = media_acima, label = paste("Mediana nota IDEB =", round(media_acima, 2)), vjust = 1.5, hjust = 1) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank()) +
+  scale_color_manual(name = "",
+                     values = c("0" = "blue", "1" = "red"),
+                     labels = c("0" = "Abaixo da mediana", "1" = "Acima da mediana")) +
+  labs(color = " % de Negros") 
+
+
+print(grafico4)
+
+
+correlacao <- cor(n_sobral_ideb$prop.cor, n_sobral_ideb$ideb)
+cat("Correlação entre % negros e nota do IDEB", correlacao, "\n")
+
+corpe <- cor.test(n_sobral_ideb$prop.cor, n_sobral_ideb$ideb, method = "pearson")
+cat("Correlação entre % negros e nota do IDEB", corpe$estimate, "\n")
+
+cat("P-valor:", corpe$p.value, "\n")
+View(n_sobral_ideb)
