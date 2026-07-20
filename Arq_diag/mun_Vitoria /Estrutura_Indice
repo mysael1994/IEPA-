@@ -1,0 +1,298 @@
+#Projeto florescer
+##
+#estrutura Vitória
+
+
+#####
+# funcao de carregamento das livrarias (caso nao esteja instalado, sera feita a instalacao auto)
+instalar_e_carregar <- function(pacotes) {
+  for (pacote in pacotes) {
+    if (!require(pacote, character.only = TRUE)) {
+      install.packages(pacote, dependencies = TRUE)
+      library(pacote, character.only = TRUE)
+    }
+  }
+}
+
+# Lista de livrarias que serao utilizados 
+pacotes_necessarios <- c("dplyr","tidyr","ggplot2","lubridate","basedosdados","openxlsx")
+
+#carregando pacotes 
+instalar_e_carregar(pacotes_necessarios)
+
+
+#acessando microdados do censo baixados no site https://www.gov.br/inep/pt-br/acesso-a-informacao/dados-abertos/microdados/censo-escolar
+
+#Acessando os arquivos dentro da pasta zip 
+caminho_zip <- "C:/Users/Mysael Justino/Documents/microdados_censo_escolar_2025_.zip"
+#unzip(caminho_zip, list = TRUE) #lista dos arquivos da pasta
+
+#ajuste e escolhendo as estruturas escolares
+Escolas.2025 <- read.csv(
+  unz(caminho_zip, "microdados_censo_escolar_2025/dados/Tabela_Escola_2025.csv"),
+  sep = ";",
+  fileEncoding = "Latin1"
+)# %>% select(CO_ENTIDADE,CO_REGIAO,CO_UF,CO_MUNICIPIO,TP_DEPENDENCIA,IN_AGUA_POTAVEL,IN_ENERGIA_REDE_PUBLICA,IN_ESGOTO_REDE_PUBLICA,
+  #           IN_AUDITORIO,IN_BIBLIOTECA,IN_COZINHA,IN_LABORATORIO_INFORMATICA,
+   #          IN_LABORATORIO_CIENCIAS,IN_PATIO_COBERTO,IN_PATIO_DESCOBERTO,IN_PARQUE_INFANTIL,
+    #         IN_QUADRA_ESPORTES,IN_REFEITORIO,IN_SALA_LEITURA,IN_MATERIAL_PED_ETNICO,
+     #        IN_EQUIP_DVD,IN_EQUIP_SOM,
+      #       IN_EQUIP_TV,IN_EQUIP_LOUSA_DIGITAL,IN_EQUIP_MULTIMIDIA,IN_TABLET_ALUNO,
+       #      IN_INTERNET,IN_INTERNET_APRENDIZAGEM,IN_INTERNET_ALUNOS,IN_AREA_VERDE)
+
+
+
+#ajuste, pegando a tependencia da escola - RETIRADO
+#TP.2025 <- read.csv(
+#  unz(caminho_zip, "microdados_censo_escolar_2025/dados/Tabela_Escola_2025.csv"),
+#  sep = ";",
+#  fileEncoding = "Latin1"
+#) %>% select(CO_ENTIDADE,TP_DEPENDENCIA)
+
+
+#pegando escolas por matriculas para separar escolas com maior e menor % de negros
+matricula.2025 <- read.csv(
+  unz(caminho_zip, "microdados_censo_escolar_2025/dados/Tabela_Matricula_2025.csv"),
+  sep = ";",
+  fileEncoding = "Latin1"
+) %>% select("CO_ENTIDADE","QT_MAT_FUND","QT_MAT_MED","QT_MAT_FUND_AF","QT_MAT_FUND_AI","QT_MAT_BAS_ND","QT_MAT_BAS_BRANCA","QT_MAT_BAS_PRETA"
+             ,"QT_MAT_BAS_PARDA","QT_MAT_BAS_AMARELA","QT_MAT_BAS_INDIGENA")
+
+#juntando info de dependencia - ANTIGO
+#matricula.2025 <- merge(matricula.2025,TP.2025, by.x = "CO_ENTIDADE", by.y = "CO_ENTIDADE")
+
+######### ANALISANDO AS ESTRUTURAS DAS ESCOLAS SENDO MAIS OU MENOS NEGRAS - pREPARAÇÃO 
+
+# juntando as bases
+matricula.2025 <- merge(matricula.2025, Escolas.2025, by = "CO_ENTIDADE")
+
+
+#filtro só Municipal e Vitoria
+matricula.2025 <- subset(matricula.2025, TP_DEPENDENCIA==3 & CO_MUNICIPIO ==3205309)
+#matricula.2025 <- subset(matricula.2025, TP_DEPENDENCIA ==3 & SG_UF  =="ES")
+
+
+#ETAPAS
+#matricula.2025 <- subset(matricula.2025, IN_COMUM_FUND_AI==1) #anos inicias
+#matricula.2025 <- subset(matricula.2025, IN_COMUM_FUND_AF==1) #anos finais
+matricula.2025 <- subset(matricula.2025, IN_COMUM_CRECHE ==1 | IN_COMUM_PRE==1) #educação basica
+
+
+
+#ajustando pra pegar a maioria negra ou branca
+#criando coluna total de matriculas por cor
+matricula.2025 <- matricula.2025 %>% mutate(total = QT_MAT_BAS_ND+QT_MAT_BAS_BRANCA+
+                                              QT_MAT_BAS_PRETA+QT_MAT_BAS_PARDA+QT_MAT_BAS_AMARELA+QT_MAT_BAS_INDIGENA)
+
+
+#adicionando as proporções por escolas
+matricula.2025 <- matricula.2025 %>%  mutate(prop_branco = QT_MAT_BAS_BRANCA/total,
+                                             prop_amarela = QT_MAT_BAS_AMARELA/total,
+                                             prop_indigena = QT_MAT_BAS_INDIGENA/total,
+                                             prop_negro = (QT_MAT_BAS_PRETA + QT_MAT_BAS_PARDA)/total)
+
+#median(matricula.2025$prop_negro)
+
+#crindo um numero Indice
+basico <- c(
+  "IN_AGUA_POTAVEL",
+  "IN_ENERGIA_REDE_PUBLICA",
+  "IN_ESGOTO_REDE_PUBLICA",
+  "IN_BANHEIRO",
+  "IN_COZINHA",
+  "IN_ALIMENTACAO"
+)
+
+pedagogico <- c(
+  "IN_BIBLIOTECA",
+  "IN_SALA_LEITURA",
+  "IN_AUDITORIO",
+  "IN_LABORATORIO_INFORMATICA",
+  "IN_LABORATORIO_CIENCIAS",
+  "IN_SALA_MULTIUSO",
+  "IN_SALA_ATENDIMENTO_ESPECIAL",
+  "IN_QUADRA_ESPORTES",
+  "IN_REFEITORIO"
+)
+
+tecnologia <- c(
+  "IN_COMPUTADOR",
+  "IN_DESKTOP_ALUNO",
+  "IN_COMP_PORTATIL_ALUNO",
+  "IN_TABLET_ALUNO",
+  "IN_INTERNET",
+  "IN_BANDA_LARGA",
+  "IN_INTERNET_APRENDIZAGEM",
+  "IN_INTERNET_ALUNOS",
+  "IN_ACESSO_INTERNET_COMPUTADOR",
+  "IN_ACES_INTERNET_DISP_PESSOAIS",
+  "IN_EQUIP_LOUSA_DIGITAL",
+  "IN_EQUIP_MULTIMIDIA"
+)
+
+convivencia <- c(
+  "IN_PATIO_COBERTO",
+  "IN_PATIO_DESCOBERTO",
+  "IN_AREA_VERDE",
+  "IN_PARQUE_INFANTIL",
+  "IN_QUADRA_ESPORTES_COBERTA",
+  "IN_QUADRA_ESPORTES_DESCOBERTA"
+)
+
+acessibilidade <- c(
+  "IN_ACESSIBILIDADE_RAMPAS",
+  "IN_ACESSIBILIDADE_CORRIMAO",
+  "IN_ACESSIBILIDADE_PISOS_TATEIS",
+  "IN_ACESSIBILIDADE_ELEVADOR",
+  "IN_ACESSIBILIDADE_SINALIZACAO"
+)
+
+equidade <- c(
+  "IN_MATERIAL_PED_ETNICO",
+  "IN_MATERIAL_PED_INDIGENA",
+  "IN_MATERIAL_PED_QUILOMBOLA")
+
+
+matricula.2025 <- matricula.2025 %>%
+  mutate(
+    
+    indice_basico =
+      rowMeans(select(., all_of(basico)), na.rm = TRUE) * 100,
+    
+    indice_pedagogico =
+      rowMeans(select(., all_of(pedagogico)), na.rm = TRUE) * 100,
+    
+    indice_tecnologia =
+      rowMeans(select(., all_of(tecnologia)), na.rm = TRUE) * 100,
+    
+    indice_convivencia =
+      rowMeans(select(., all_of(convivencia)), na.rm = TRUE) * 100,
+    
+    indice_acessibilidade =
+      rowMeans(select(., all_of(acessibilidade)), na.rm = TRUE) * 100,
+    
+    indice_ped_ERER =
+      rowMeans(select(., all_of(equidade)), na.rm = TRUE) * 100
+  )
+
+
+matricula.2025 <- matricula.2025 %>%
+  mutate(
+    indice_geral =
+      rowMeans(
+        select(.,
+               indice_pedagogico,
+               indice_tecnologia,
+               indice_convivencia,
+               indice_acessibilidade,
+               indice_ped_ERER),
+        na.rm = TRUE
+      )
+  )
+
+
+
+summary(select(matricula.2025,
+               indice_basico,
+               indice_pedagogico,
+               indice_tecnologia,
+               indice_convivencia,
+               indice_acessibilidade,
+               indice_ped_ERER,
+               indice_geral))
+
+
+#tABELA PORNTA PARA EXPORTAR PARA O EXCEL 
+tabela_indice <- data.frame(
+  Dimensao = c(
+    "Básico",
+    "Pedagógico",
+    "Tecnologia",
+    "Convivência",
+    "Acessibilidade",
+    "Equidade",
+    "Geral"
+  ),
+  
+  Indice = c(
+    mean(matricula.2025$indice_basico, na.rm = TRUE),
+    mean(matricula.2025$indice_pedagogico, na.rm = TRUE),
+    mean(matricula.2025$indice_tecnologia, na.rm = TRUE),
+    mean(matricula.2025$indice_convivencia, na.rm = TRUE),
+    mean(matricula.2025$indice_acessibilidade, na.rm = TRUE),
+    mean(matricula.2025$indice_ped_ERER, na.rm = TRUE),
+    mean(matricula.2025$indice_geral, na.rm = TRUE)
+  )
+)
+
+tabela_indice$Indice <- round(tabela_indice$Indice, 1)
+
+tabela_indice
+
+
+
+write.xlsx(
+  tabela_indice,
+  "indice_estrutura_vitoria_EB.xlsx",
+  overwrite = TRUE
+)
+
+#VEND SE A CORRELAÇÃO COM A COR
+cor(matricula.2025$prop_negro,
+    matricula.2025$indice_geral)
+
+cor(select(matricula.2025,
+           prop_negro,
+           indice_basico,
+           indice_pedagogico,
+           indice_tecnologia,
+           indice_convivencia,
+           indice_acessibilidade,
+           indice_equidade,
+           indice_geral),
+    use="pairwise.complete.obs")
+
+
+ggplot(matricula.2025,
+       aes(prop_negro,
+           indice_geral))+
+  
+  geom_point(size=3)+
+  
+  geom_smooth(method="lm",
+              se=FALSE)+
+  
+  theme_minimal()
+
+
+matricula.2025 <- matricula.2025 %>%
+  mutate(
+    grupo_racial =
+      ifelse(prop_negro >= median(prop_negro),
+             "Maior proporção de estudantes negros",
+             "Menor proporção de estudantes negros")
+  )
+
+matricula.2025 %>%
+  group_by(grupo_racial) %>%
+  summarise(
+    
+    escolas=n(),
+    
+    indice_geral=mean(indice_geral),
+    
+    pedagogico=mean(indice_pedagogico),
+    
+    tecnologia=mean(indice_tecnologia),
+    
+    convivência=mean(indice_convivencia),
+    
+    acessibilidade=mean(indice_acessibilidade),
+    
+    equidade=mean(indice_equidade)
+  )
+
+wilcox.test(indice_geral ~ grupo_racial,
+            data=matricula.2025)
+
+
