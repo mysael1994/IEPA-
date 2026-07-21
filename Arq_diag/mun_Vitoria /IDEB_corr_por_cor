@@ -1,0 +1,371 @@
+#Correlçao IDEB e proporção de cor por escolas 
+#######
+#AQUI, FAZER UMA ANALISE DO CENSO 2023 COM O IDEB 2023 
+
+#####
+# funcao de carregamento das livrarias (caso nao esteja instalado, sera feita a instalacao auto)
+instalar_e_carregar <- function(pacotes) {
+  for (pacote in pacotes) {
+    if (!require(pacote, character.only = TRUE)) {
+      install.packages(pacote, dependencies = TRUE)
+      library(pacote, character.only = TRUE)
+    }
+  }
+}
+
+# Lista de livrarias que serao utilizados 
+pacotes_necessarios <- c("dplyr","tidyr","ggplot2","lubridate","basedosdados")
+
+#carregando pacotes 
+instalar_e_carregar(pacotes_necessarios)
+
+set_billing_id("mahin-dados")
+
+Infraescola_2023 <- basedosdados::read_sql('SELECT sigla_uf,ano,id_municipio,id_escola,rede,profissional_psicologo,biblioteca,laboratorio_informatica,acesso_internet_computador,
+                                      etapa_ensino_infantil, etapa_ensino_fundamental, quantidade_matricula_nao_declarada,quantidade_matricula_branca,
+quantidade_matricula_preta,quantidade_matricula_parda,quantidade_matricula_amarela,quantidade_matricula_indigena FROM `basedosdados.br_inep_censo_escolar.escola` WHERE ano =2023')
+
+# Função para mudar classe de integer64 para integer #
+
+is.integer64 <- function(x){
+  class(x)=="integer64"
+}
+
+Infraescola_2023 <- Infraescola_2023 %>% mutate_if(is.integer64, as.integer)
+#trazeno ja os dados do IDEB
+#query <- bdplyr("br_bd_diretorios_brasil.municipio")
+set_billing_id("ideb-412717")
+
+
+ideb_2023 <- basedosdados::read_sql('SELECT * 
+                                    FROM `basedosdados.br_inep_ideb.escola` WHERE ano = 2023')
+
+#ajustando a infra
+Infraescola_2023 <- Infraescola_2023 %>%
+  mutate(
+    total_declarado =
+      quantidade_matricula_branca +
+      quantidade_matricula_preta +
+      quantidade_matricula_parda +
+      quantidade_matricula_amarela +
+      quantidade_matricula_indigena,
+    
+    total_geral =
+      total_declarado +
+      quantidade_matricula_nao_declarada,
+    
+    prop_negro =
+      (quantidade_matricula_preta +
+         quantidade_matricula_parda) / total_declarado,
+    
+    prop_branco =
+      quantidade_matricula_branca / total_declarado,
+    
+    prop_nao_declarada =
+      quantidade_matricula_nao_declarada / total_geral
+  ) %>%
+  filter(
+    rede == "3",
+    id_municipio == "3205309",
+    etapa_ensino_fundamental == 1,
+    total_declarado > 0
+  )
+
+summary(Infraescola_2023$prop_nao_declarada)
+
+#pegando Inde de vitoria
+ideb_vitoria_2023 <- ideb_2023 %>%
+  mutate(
+    ano = as.integer(ano)
+  ) %>%
+  filter(
+    ano == 2023,
+    id_municipio == "3205309",
+    rede == "municipal",
+    ensino == "fundamental",
+    anos_escolares %in% c(
+      "iniciais (1-5)",
+      "finais (6-9)"
+    ),
+    !is.na(ideb)
+  ) %>%
+  select(
+    id_escola,
+    anos_escolares,
+    taxa_aprovacao,
+    indicador_rendimento,
+    nota_saeb_matematica,
+    nota_saeb_lingua_portuguesa,
+    nota_saeb_media_padronizada,
+    ideb
+  )
+
+ideb_vitoria_2023 %>%
+  count(id_escola, anos_escolares) %>%
+  filter(n > 1)
+
+ideb_vitoria_2023 %>%
+  count(anos_escolares)
+
+#juntando
+completa_2023 <- Infraescola_2023 %>%
+  inner_join(
+    ideb_vitoria_2023,
+    by = "id_escola"
+  )
+
+#verificando
+nrow(completa_2023)
+
+n_distinct(completa_2023$id_escola)
+
+completa_2023 %>%
+  count(anos_escolares)
+
+completa_2023 %>%
+  count(id_escola, anos_escolares) %>%
+  filter(n > 1)
+
+#criando duas bases
+ideb_iniciais <- completa_2023 %>%
+  filter(anos_escolares == "iniciais (1-5)")
+
+ideb_finais <- completa_2023 %>%
+  filter(anos_escolares == "finais (6-9)")
+
+nrow(ideb_iniciais)
+nrow(ideb_finais)
+
+#iniciando a etapa descritiva
+ideb_iniciais %>%
+  summarise(
+    escolas = n_distinct(id_escola),
+    prop_negro_media = mean(prop_negro, na.rm = TRUE),
+    prop_negro_mediana = median(prop_negro, na.rm = TRUE),
+    ideb_medio = mean(ideb, na.rm = TRUE),
+    ideb_mediano = median(ideb, na.rm = TRUE),
+    ideb_minimo = min(ideb, na.rm = TRUE),
+    ideb_maximo = max(ideb, na.rm = TRUE)
+  )
+
+ideb_finais %>%
+  summarise(
+    escolas = n_distinct(id_escola),
+    prop_negro_media = mean(prop_negro, na.rm = TRUE),
+    prop_negro_mediana = median(prop_negro, na.rm = TRUE),
+    ideb_medio = mean(ideb, na.rm = TRUE),
+    ideb_mediano = median(ideb, na.rm = TRUE),
+    ideb_minimo = min(ideb, na.rm = TRUE),
+    ideb_maximo = max(ideb, na.rm = TRUE)
+  )
+
+#dispersão
+library(ggplot2)
+library(scales)
+
+vitoria_anosini <- ggplot(
+  ideb_iniciais,
+  aes(
+    x = prop_negro,
+    y = ideb
+  )
+) +
+  geom_point(size = 3, alpha = 0.8) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE
+  ) +
+  scale_x_continuous(
+    labels = percent_format(accuracy = 1)
+  ) +
+  labs(
+    title = "IDEB e proporção de estudantes negros",
+    subtitle = "Anos iniciais do ensino fundamental — Vitória, 2023",
+    x = "Proporção de estudantes pretos e pardos",
+    y = "IDEB"
+  ) +
+  theme_minimal()
+
+#ggsave(
+#  filename = "correlacao_ideb_anos_iniciais.png",
+#  plot = vitoria_anosini,
+#  width = 12,
+#  height = 8,
+#  units = "in",
+#  dpi = 600,
+#  bg = "white"
+#)
+#anos finais 
+
+vitoria_anosfina <- ggplot(
+  ideb_finais,
+  aes(
+    x = prop_negro,
+    y = ideb
+  )
+) +
+  geom_point(size = 3, alpha = 0.8) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE
+  ) +
+  scale_x_continuous(
+    labels = percent_format(accuracy = 1)
+  ) +
+  labs(
+    title = "IDEB e proporção de estudantes negros",
+    subtitle = "Anos finais do ensino fundamental — Vitória, 2023",
+    x = "Proporção de estudantes pretos e pardos",
+    y = "IDEB"
+  ) +
+  theme_minimal()
+
+#ggsave(
+#  filename = "correlacao_ideb_anos_finais.png",
+#  plot = vitoria_anosfina,
+#  width = 12,
+#  height = 8,
+#  units = "in",
+#  dpi = 600,
+#  bg = "white"
+#)
+#Calculo das correlações 
+#anos iniciais
+cor.test(
+  ideb_iniciais$prop_negro,
+  ideb_iniciais$ideb,
+  method = "pearson"
+)
+
+cor.test(
+  ideb_iniciais$prop_negro,
+  ideb_iniciais$ideb,
+  method = "spearman",
+  exact = FALSE
+)
+
+#anos finais 
+cor.test(
+  ideb_finais$prop_negro,
+  ideb_finais$ideb,
+  method = "pearson"
+)
+
+cor.test(
+  ideb_finais$prop_negro,
+  ideb_finais$ideb,
+  method = "spearman",
+  exact = FALSE
+)
+
+#comparar os resultados com as escolas mais negras e brancas
+ideb_iniciais <- ideb_iniciais %>%
+  mutate(
+    grupo_racial = if_else(
+      prop_negro >= median(prop_negro, na.rm = TRUE),
+      "Maior proporção de estudantes negros",
+      "Menor proporção de estudantes negros"
+    )
+  )
+
+ideb_iniciais %>%
+  group_by(grupo_racial) %>%
+  summarise(
+    escolas = n_distinct(id_escola),
+    proporcao_negra_media = mean(prop_negro, na.rm = TRUE),
+    ideb_medio = mean(ideb, na.rm = TRUE),
+    ideb_mediano = median(ideb, na.rm = TRUE),
+    desvio_padrao = sd(ideb, na.rm = TRUE)
+  )
+
+wilcox.test(
+  ideb ~ grupo_racial,
+  data = ideb_iniciais,
+  exact = FALSE
+)
+
+#anos finais 
+ideb_finais <- ideb_finais %>%
+  mutate(
+    grupo_racial = if_else(
+      prop_negro >= median(prop_negro, na.rm = TRUE),
+      "Maior proporção de estudantes negros",
+      "Menor proporção de estudantes negros"
+    )
+  )
+
+ideb_finais %>%
+  group_by(grupo_racial) %>%
+  summarise(
+    escolas = n_distinct(id_escola),
+    proporcao_negra_media = mean(prop_negro, na.rm = TRUE),
+    ideb_medio = mean(ideb, na.rm = TRUE),
+    ideb_mediano = median(ideb, na.rm = TRUE),
+    desvio_padrao = sd(ideb, na.rm = TRUE)
+  )
+
+wilcox.test(
+  ideb ~ grupo_racial,
+  data = ideb_finais,
+  exact = FALSE
+)
+
+#regressão linear simples
+modelo_iniciais <- lm(
+  ideb ~ prop_negro,
+  data = ideb_iniciais
+)
+
+summary(modelo_iniciais)
+
+modelo_finais <- lm(
+  ideb ~ prop_negro,
+  data = ideb_finais
+)
+
+summary(modelo_finais)
+
+#ajustando
+ideb_iniciais <- ideb_iniciais %>%
+  mutate(prop_negro_pp = prop_negro * 100)
+
+ideb_finais <- ideb_finais %>%
+  mutate(prop_negro_pp = prop_negro * 100)
+
+modelo_iniciais <- lm(
+  ideb ~ prop_negro_pp,
+  data = ideb_iniciais
+)
+
+modelo_finais <- lm(
+  ideb ~ prop_negro_pp,
+  data = ideb_finais
+)
+
+summary(modelo_iniciais)
+summary(modelo_finais)
+
+#SELECIONANDO AS 5 MELHORES ESCOLAS E 5 PIORES 
+top5_iniciais <- ideb_iniciais %>%
+  arrange(desc(ideb)) %>%
+  select(
+    id_escola,
+    ideb,
+    prop_negro,
+    prop_branco
+  ) %>%
+  slice(1:5)
+
+top5_iniciais
+
+bottom5_iniciais <- ideb_iniciais %>%
+  arrange(ideb) %>%
+  select(
+    id_escola,
+    ideb,
+    prop_negro,
+    prop_branco
+  ) %>%
+  slice(1:5)
+
+bottom5_iniciais
