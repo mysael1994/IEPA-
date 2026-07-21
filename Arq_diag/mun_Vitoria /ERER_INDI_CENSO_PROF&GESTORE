@@ -1,0 +1,150 @@
+##### Professores 
+# funcao de carregamento das livrarias (caso nao esteja instalado, sera feita a instalacao auto)
+instalar_e_carregar <- function(pacotes) {
+  for (pacote in pacotes) {
+    if (!require(pacote, character.only = TRUE)) {
+      install.packages(pacote, dependencies = TRUE)
+      library(pacote, character.only = TRUE)
+    }
+  }
+}
+
+# Lista de livrarias que serao utilizados 
+pacotes_necessarios <- c("dplyr","tidyr","ggplot2","lubridate","basedosdados","openxlsx")
+
+#carregando pacotes 
+instalar_e_carregar(pacotes_necessarios)
+
+
+#acessando microdados do censo baixados no site https://www.gov.br/inep/pt-br/acesso-a-informacao/dados-abertos/microdados/censo-escolar
+
+#Acessando os arquivos dentro da pasta zip 
+caminho_zip <- "C:/Users/Mysael Justino/Documents/microdados_censo_escolar_2025_.zip"
+#unzip(caminho_zip, list = TRUE) #lista dos arquivos da pasta
+
+Escolas.2025 <- read.csv(
+  unz(caminho_zip, "microdados_censo_escolar_2025/dados/Tabela_Escola_2025.csv"),
+  sep = ";",
+  fileEncoding = "Latin1"
+) %>% select(CO_ENTIDADE,CO_REGIAO,CO_UF,CO_MUNICIPIO,TP_DEPENDENCIA,CO_ENTIDADE,
+             IN_COMUM_CRECHE,IN_COMUM_PRE,IN_COMUM_FUND_AI,IN_COMUM_FUND_AF)#,IN_AGUA_POTAVEL,IN_ENERGIA_REDE_PUBLICA,IN_ESGOTO_REDE_PUBLICA,
+#           IN_AUDITORIO,IN_BIBLIOTECA,IN_COZINHA,IN_LABORATORIO_INFORMATICA,
+#          IN_LABORATORIO_CIENCIAS,IN_PATIO_COBERTO,IN_PATIO_DESCOBERTO,IN_PARQUE_INFANTIL,
+#         IN_QUADRA_ESPORTES,IN_REFEITORIO,IN_SALA_LEITURA,IN_MATERIAL_PED_ETNICO,
+#        IN_EQUIP_DVD,IN_EQUIP_SOM,
+#       IN_EQUIP_TV,IN_EQUIP_LOUSA_DIGITAL,IN_EQUIP_MULTIMIDIA,IN_TABLET_ALUNO,
+#      IN_INTERNET,IN_INTERNET_APRENDIZAGEM,IN_INTERNET_ALUNOS,IN_AREA_VERDE)
+
+prof.2025 <- read.csv(
+  unz(caminho_zip, "microdados_censo_escolar_2025/dados/Tabela_Docente_2025.csv"),
+  sep = ";",
+  fileEncoding = "Latin1"
+) %>% select("CO_ENTIDADE","QT_DOC_BAS_BRANCA","QT_DOC_BAS_PARDA","QT_DOC_BAS_PRETA",
+             "QT_DOC_BAS_AMARELA","QT_DOC_BAS_INDIGENA","QT_DOC_BAS_ND",
+             ,"QT_DOC_MED","QT_DOC_FUND","QT_DOC_BAS_ESPEC_AFRO")
+
+prof.2025 <- merge(prof.2025,Escolas.2025, by = "CO_ENTIDADE")
+
+prof.2025 <- prof.2025 %>%
+  mutate(
+    QT_DOC_TOTAL =
+      QT_DOC_BAS_BRANCA +
+      QT_DOC_BAS_PARDA +
+      QT_DOC_BAS_PRETA +
+      QT_DOC_BAS_AMARELA +
+      QT_DOC_BAS_INDIGENA +
+      QT_DOC_BAS_ND
+  )
+
+
+prof_vitoria <- prof.2025 %>%
+  filter(
+    TP_DEPENDENCIA == 3,
+    CO_UF == 32, #CO_UF == 32 #CO_MUNICIPIO == 3205309
+    QT_DOC_TOTAL > 0
+  )
+
+
+
+
+#ERER e indigena
+prof_vitoria_infantil <- prof_vitoria %>%
+  filter(
+    IN_COMUM_CRECHE == 1 | IN_COMUM_PRE == 1
+  ) #IN_COMUM_FUND_AI #IN_COMUM_FUND_AF #IN_COMUM_CRECHE == 1 | IN_COMUM_PRE == 1
+
+resultado_vitoria_infantil <- prof_vitoria_infantil %>%
+  summarise(
+    escolas = n_distinct(CO_ENTIDADE),
+    total_docentes = sum(QT_DOC_TOTAL, na.rm = TRUE),
+    
+    # Formação continuada em ERER
+    docentes_erer = sum(QT_DOC_BAS_ESPEC_AFRO, na.rm = TRUE),
+    percentual_erer = docentes_erer / total_docentes * 100,
+    
+    # Docentes indígenas
+    docentes_indigenas = sum(QT_DOC_BAS_INDIGENA, na.rm = TRUE),
+    percentual_indigenas = docentes_indigenas / total_docentes * 100
+  ) %>%
+  mutate(
+    percentual_erer = round(percentual_erer, 1),
+    percentual_indigenas = round(percentual_indigenas, 2)
+  )
+
+resultado_vitoria_infantil
+
+##### GESTORES #####
+gestor.2025 <- read.csv(
+  unz(caminho_zip, "microdados_censo_escolar_2025/dados/Tabela_Gestor_Escolar_2025.csv"),
+  sep = ";",
+  fileEncoding = "Latin1"
+) %>% select("CO_ENTIDADE","QT_GEST_BAS_BRANCA","QT_GEST_BAS_PRETA","QT_GEST_BAS_PARDA",
+             "QT_GEST_BAS_AMARELA","QT_GEST_BAS_INDIGENA","QT_GEST_BAS_ND",
+             ,"QT_GEST_BAS_DIRETOR","QT_GEST_BAS_OUTRO","QT_GEST_BAS_ESPEC_AFRO","QT_GEST_BAS_ESPEC_ED_INDIGENA"
+)
+
+
+gestor.2025 <- merge(gestor.2025,Escolas.2025, by = "CO_ENTIDADE")
+
+gestor.2025 <- gestor.2025 %>%
+  mutate(
+    QT_TOTAL_ =
+      QT_GEST_BAS_BRANCA +
+      QT_GEST_BAS_PRETA +
+      QT_GEST_BAS_PARDA +
+      QT_GEST_BAS_AMARELA +
+      QT_GEST_BAS_INDIGENA +
+      QT_GEST_BAS_ND
+  )
+
+
+gesto_vitoria <- gestor.2025 %>%
+  filter(
+    TP_DEPENDENCIA == 3,
+    CO_MUNICIPIO == 3205309, #CO_UF == 32 #CO_MUNICIPIO == 3205309
+    QT_TOTAL_ > 0
+  )
+
+
+
+
+#ERER e indigena
+resultado_gestor <- gesto_vitoria %>%
+  summarise(
+    escolas = n_distinct(CO_ENTIDADE),
+    total_gestores = sum(QT_TOTAL_, na.rm = TRUE),
+    
+    # Formação continuada em ERER
+    gestores_erer = sum(QT_GEST_BAS_ESPEC_AFRO, na.rm = TRUE),
+    percentual_erer = gestores_erer / total_gestores * 100,
+    
+    # Gestores indígenas
+    gestores_indigenas = sum(QT_GEST_BAS_ESPEC_ED_INDIGENA, na.rm = TRUE),
+    percentual_indigenas = gestores_indigenas / total_gestores * 100
+  ) %>%
+  mutate(
+    percentual_erer = round(percentual_erer, 1),
+    percentual_indigenas = round(percentual_indigenas, 2)
+  )
+
+resultado_gestor
