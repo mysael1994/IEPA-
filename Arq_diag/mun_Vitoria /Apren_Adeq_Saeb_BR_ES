@@ -78,7 +78,7 @@ Saeb_9EF <- Saeb_9EF %>% mutate(raca = ifelse(raca_cor == "A", "Branco",
                                                                    ifelse(raca_cor == "E", "Indígena", "ND")))))
 )
 
-# Codificando aprendizagem adequada 
+# Codificando aprendizagem adequada (classificação Qedu) - https://conteudos.qedu.org.br/academia/aprendizado-adequado/
 
 Saeb_5EF <- Saeb_5EF %>% mutate(LP_adequado = ifelse(proficiencia_saeb >= 200 & disciplina =="LP" ,1,0))
 Saeb_5EF <- Saeb_5EF %>% mutate(MAT_adequado = ifelse(proficiencia_saeb >= 225 & disciplina =="MT",1,0))
