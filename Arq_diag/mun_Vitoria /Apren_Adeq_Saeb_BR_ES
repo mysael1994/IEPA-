@@ -1,0 +1,307 @@
+###### Mahin ######
+
+# Projeto Vitória #
+
+library(basedosdados)
+library(dplyr)
+library(scales)
+library(survey)
+library(convey)
+library(ggplot2)
+library(formattable)
+library(googledrive)
+library(bit64)
+library(janitor)
+library(ggrepel)
+library(tidyr)
+
+# SAEB # 
+
+# Usando base dos dados #
+
+set_billing_id("mahin-dados")
+
+# Dicionario #
+query <- bdplyr("br_inep_saeb.dicionario")
+dicionario_Saeb <- bd_collect(query)
+
+# Abrindo base 5 ano EF e Selecionando apenas VI´toria e rede municipal #
+Saeb_5EF <- basedosdados::read_sql('SELECT sigla_uf,id_regiao,id_municipio,id_aluno,rede,serie,proficiencia, disciplina,peso_aluno,
+                                     proficiencia_saeb,sexo,raca_cor,nivel_inse,inse FROM `basedosdados.br_inep_saeb.aluno_ef_5ano` WHERE ano =2023')
+
+# Abrindo base 9 ano EF e Selecionando apenas Vitoria e rede municipal #
+Saeb_9EF <- basedosdados::read_sql('SELECT sigla_uf,id_regiao,id_municipio,id_aluno,rede,serie,proficiencia, disciplina,peso_aluno,
+                                     proficiencia_saeb,sexo,raca_cor,nivel_inse,inse,indicador_inse FROM `basedosdados.br_inep_saeb.aluno_ef_9ano` WHERE ano =2023')
+
+
+## Criando dummy vitoria, Omitindo NA's (sem nota e sem ponderação de aluno) e selecionando apenas escolas municipais ##
+
+# 5 EF
+#Saeb_5EF <- Saeb_5EF %>% mutate(ES=ifelse(sigla_uf %in% "ES",1,0))
+Saeb_5EF <- Saeb_5EF %>% drop_na(proficiencia_saeb)
+Saeb_5EF <- Saeb_5EF %>% drop_na(peso_aluno)
+#Saeb_5EF <- subset(Saeb_5EF, rede %in% "3")
+
+# 9 EF
+#Saeb_9EF <- Saeb_9EF %>% mutate(ES=ifelse(sigla_uf %in% "ES",1,0))
+Saeb_9EF <- Saeb_9EF %>% drop_na(proficiencia_saeb)
+Saeb_9EF <- Saeb_9EF %>% drop_na(peso_aluno)
+#Saeb_9EF <- subset(Saeb_9EF, rede %in% "3")
+
+# Codificando cor/raca 5EF
+#Saeb_5EF <- Saeb_5EF %>% mutate(raca = ifelse (raca_cor == "A","branco",
+#                                               ifelse(raca_cor %in% c("B","C"), "negro",
+#                                                      ifelse(raca_cor == "D","Amarela",
+#                                                             ifelse(raca_cor == "E","Indígena","ND")))))
+
+
+Saeb_5EF <- Saeb_5EF %>%
+  mutate(
+    raca = ifelse(raca_cor == "A", "Branco",
+                  ifelse(raca_cor == "B", "Preto",
+                         ifelse(raca_cor == "C", "Pardo",
+                                ifelse(raca_cor == "D", "Amarela",
+                                       ifelse(raca_cor == "E", "Indígena", "ND")))))
+  )
+
+
+
+# Codificando cor/raca 9EF
+#Saeb_9EF <- Saeb_9EF %>% mutate(raca = ifelse (raca_cor == "A","branco",
+#                                               ifelse(raca_cor %in% c("B","C"), "negro",
+#                                                      ifelse(raca_cor == "D","Amarela",
+#                                                             ifelse(raca_cor == "E","Indígena","ND")))))
+Saeb_9EF <- Saeb_9EF %>% mutate(raca = ifelse(raca_cor == "A", "Branco",
+                                              ifelse(raca_cor == "B", "Preto",
+                                                     ifelse(raca_cor == "C", "Pardo",
+                                                            ifelse(raca_cor == "D", "Amarela",
+                                                                   ifelse(raca_cor == "E", "Indígena", "ND")))))
+)
+
+# Codificando aprendizagem adequada 
+
+Saeb_5EF <- Saeb_5EF %>% mutate(LP_adequado = ifelse(proficiencia_saeb >= 200 & disciplina =="LP" ,1,0))
+Saeb_5EF <- Saeb_5EF %>% mutate(MAT_adequado = ifelse(proficiencia_saeb >= 225 & disciplina =="MT",1,0))
+Saeb_9EF <- Saeb_9EF %>% mutate(LP_adequado = ifelse(proficiencia_saeb >= 275 & disciplina =="LP" ,1,0))
+Saeb_9EF <- Saeb_9EF %>% mutate(MAT_adequado = ifelse(proficiencia_saeb >= 300 & disciplina =="MT",1,0))
+
+# Comparando proficiência negros e brancos para BR, CE e Sobral
+
+## BR ##
+Saeb_Adequado_LP_5EF_BR <- subset(Saeb_5EF, disciplina == "LP") %>% group_by(raca) %>% summarise(LP_adequado = weighted.mean(LP_adequado,peso_aluno))
+Saeb_Adequado_MAT_5EF_BR <- subset(Saeb_5EF, disciplina == "MT") %>% group_by(raca) %>% summarise(MAT_adequado = weighted.mean(MAT_adequado,peso_aluno))
+Saeb_Adequado_LP_9EF_BR <- subset(Saeb_9EF, disciplina == "LP") %>% group_by(raca) %>% summarise(LP_adequado = weighted.mean(LP_adequado,peso_aluno))
+Saeb_Adequado_MAT_9EF_BR <- subset(Saeb_9EF, disciplina == "MT") %>% group_by(raca) %>% summarise(MAT_adequado = weighted.mean(MAT_adequado,peso_aluno))
+
+## ES ##
+Saeb_Adequado_LP_5EF_ES <- subset(Saeb_5EF, disciplina == "LP" & sigla_uf == "ES") %>% group_by(raca) %>% summarise(LP_adequado = weighted.mean(LP_adequado,peso_aluno))
+Saeb_Adequado_MAT_5EF_ES <- subset(Saeb_5EF, disciplina == "MT" & sigla_uf == "ES") %>% group_by(raca) %>% summarise(MAT_adequado = weighted.mean(MAT_adequado,peso_aluno))
+Saeb_Adequado_LP_9EF_ES <- subset(Saeb_9EF, disciplina == "LP" & sigla_uf == "ES") %>% group_by(raca) %>% summarise(LP_adequado = weighted.mean(LP_adequado,peso_aluno))
+Saeb_Adequado_MAT_9EF_ES <- subset(Saeb_9EF, disciplina == "MT" & sigla_uf == "ES") %>% group_by(raca) %>% summarise(MAT_adequado = weighted.mean(MAT_adequado,peso_aluno))
+
+## Sobral ##
+#Saeb_Adequado_LP_5EF_Sobral <- subset(Saeb_5EF, disciplina == "LP" & sobral == 1) %>% group_by(raca) %>% summarise(LP_adequado = weighted.mean(LP_adequado,peso_aluno))
+#Saeb_Adequado_MAT_5EF_Sobral <- subset(Saeb_5EF, disciplina == "MT" & sobral == 1) %>% group_by(raca) %>% summarise(MAT_adequado = weighted.mean(MAT_adequado,peso_aluno))
+#Saeb_Adequado_LP_9EF_Sobral <- subset(Saeb_9EF, disciplina == "LP" & sobral == 1) %>% group_by(raca) %>% summarise(LP_adequado = weighted.mean(LP_adequado,peso_aluno))
+#Saeb_Adequado_MAT_9EF_Sobral <- subset(Saeb_9EF, disciplina == "MT" & sobral == 1) %>% group_by(raca) %>% summarise(MAT_adequado = weighted.mean(MAT_adequado,peso_aluno))
+
+### Gráficos ###
+
+# Agregações geográficas: Brasil e Espírito Santo
+Agregado <- rep(c("BR", "ES"), 5)
+
+# Categorias raciais
+infra <- c(
+  rep("Estudantes brancos", 2),
+  rep("Estudantes pretos", 2),
+  rep("Estudantes pardos", 2),
+  rep("Estudantes amarelos", 2),
+  rep("Estudantes indígenas", 2)
+)
+
+# ============================================================
+# 5º ANO DO ENSINO FUNDAMENTAL — LÍNGUA PORTUGUESA
+# ============================================================
+
+prop_5EF_LP <- c(
+  
+  # Brancos
+  Saeb_Adequado_LP_5EF_BR[2, 2],
+  Saeb_Adequado_LP_5EF_ES[2, 2],
+  
+  # Pretos
+  Saeb_Adequado_LP_5EF_BR[6, 2],
+  Saeb_Adequado_LP_5EF_ES[6, 2],
+  
+  # Pardos
+  Saeb_Adequado_LP_5EF_BR[5, 2],
+  Saeb_Adequado_LP_5EF_ES[5, 2],
+  
+  # Amarelos
+  Saeb_Adequado_LP_5EF_BR[1, 2],
+  Saeb_Adequado_LP_5EF_ES[1, 2],
+  
+  # Indígenas
+  Saeb_Adequado_LP_5EF_BR[3, 2],
+  Saeb_Adequado_LP_5EF_ES[3, 2]
+)
+
+# ============================================================
+# 5º ANO DO ENSINO FUNDAMENTAL — MATEMÁTICA
+# ============================================================
+
+prop_5EF_MAT <- c(
+  
+  # Brancos
+  Saeb_Adequado_MAT_5EF_BR[2, 2],
+  Saeb_Adequado_MAT_5EF_ES[2, 2],
+  
+  # Pretos
+  Saeb_Adequado_MAT_5EF_BR[6, 2],
+  Saeb_Adequado_MAT_5EF_ES[6, 2],
+  
+  # Pardos
+  Saeb_Adequado_MAT_5EF_BR[5, 2],
+  Saeb_Adequado_MAT_5EF_ES[5, 2],
+  
+  # Amarelos
+  Saeb_Adequado_MAT_5EF_BR[1, 2],
+  Saeb_Adequado_MAT_5EF_ES[1, 2],
+  
+  # Indígenas
+  Saeb_Adequado_MAT_5EF_BR[3, 2],
+  Saeb_Adequado_MAT_5EF_ES[3, 2]
+)
+
+# ============================================================
+# 9º ANO DO ENSINO FUNDAMENTAL — LÍNGUA PORTUGUESA
+# ============================================================
+
+prop_9EF_LP <- c(
+  
+  # Brancos
+  Saeb_Adequado_LP_9EF_BR[2, 2],
+  Saeb_Adequado_LP_9EF_ES[2, 2],
+  
+  # Pretos
+  Saeb_Adequado_LP_9EF_BR[6, 2],
+  Saeb_Adequado_LP_9EF_ES[6, 2],
+  
+  # Pardos
+  Saeb_Adequado_LP_9EF_BR[5, 2],
+  Saeb_Adequado_LP_9EF_ES[5, 2],
+  
+  # Amarelos
+  Saeb_Adequado_LP_9EF_BR[1, 2],
+  Saeb_Adequado_LP_9EF_ES[1, 2],
+  
+  # Indígenas
+  Saeb_Adequado_LP_9EF_BR[3, 2],
+  Saeb_Adequado_LP_9EF_ES[3, 2]
+)
+
+# ============================================================
+# 9º ANO DO ENSINO FUNDAMENTAL — MATEMÁTICA
+# ============================================================
+
+prop_9EF_MAT <- c(
+  
+  # Brancos
+  Saeb_Adequado_MAT_9EF_BR[2, 2],
+  Saeb_Adequado_MAT_9EF_ES[2, 2],
+  
+  # Pretos
+  Saeb_Adequado_MAT_9EF_BR[6, 2],
+  Saeb_Adequado_MAT_9EF_ES[6, 2],
+  
+  # Pardos
+  Saeb_Adequado_MAT_9EF_BR[5, 2],
+  Saeb_Adequado_MAT_9EF_ES[5, 2],
+  
+  # Amarelos
+  Saeb_Adequado_MAT_9EF_BR[1, 2],
+  Saeb_Adequado_MAT_9EF_ES[1, 2],
+  
+  # Indígenas
+  Saeb_Adequado_MAT_9EF_BR[3, 2],
+  Saeb_Adequado_MAT_9EF_ES[3, 2]
+)
+
+# Formatação em percentual
+prop_5EF_LP <- formattable::percent(prop_5EF_LP, digits = 1)
+prop_5EF_MAT <- formattable::percent(prop_5EF_MAT, digits = 1)
+prop_9EF_LP <- formattable::percent(prop_9EF_LP, digits = 1)
+prop_9EF_MAT <- formattable::percent(prop_9EF_MAT, digits = 1)
+
+# Base final
+DataGraf <- data.frame(
+  Agregado,
+  infra,
+  prop_5EF_LP,
+  prop_5EF_MAT,
+  prop_9EF_LP,
+  prop_9EF_MAT
+)
+
+DataGraf
+
+
+## 5 Ano EF LP ##
+
+Graf_5EF_LP <- ggplot(DataGraf, aes(fill= infra, y=prop_5EF_LP, x= Agregado)) +
+  geom_bar(position="dodge", stat="identity") + ggtitle("Aprendizagem adequada em LP para alunos do 5ª Ano do Ensino Fundamental (2019)") +
+  xlab("") + ylab("") + geom_text(aes(label = prop_5EF_LP), position= position_dodge(0.9), vjust= -0.2, size=7)  + #scale_fill_manual(values=c("#f4cccc","#b3402e")) +
+  theme_light(base_size=15) + theme(legend.title=element_blank())
+
+
+Graf_5EF_LP
+
+## 5 Ano EF MAT
+
+Graf_5EF_MAT <- ggplot(DataGraf, aes(fill= infra, y=prop_5EF_MAT, x= Agregado)) +
+  geom_bar(position="dodge", stat="identity") + ggtitle("Aprendizagem adequada em MAT para alunos do 5ª Ano do Ensino Fundamental (2019)") +
+  xlab("") + ylab("") + geom_text(aes(label = prop_5EF_MAT), position= position_dodge(0.9), vjust= -0.2, size=7)  + scale_fill_manual(values=c("#f4cccc","#b3402e")) +
+  theme_light(base_size=15) + theme(legend.title=element_blank())
+
+Graf_5EF_MAT
+
+## 9 Ano EF LP
+
+Graf_9EF_LP <- ggplot(DataGraf, aes(fill= infra, y=prop_9EF_LP, x= Agregado)) +
+  geom_bar(position="dodge", stat="identity") + ggtitle("Aprendizagem adequada em LP para alunos do 9ª Ano do Ensino Fundamental (2019)") +
+  xlab("") + ylab("") + geom_text(aes(label = prop_9EF_LP), position= position_dodge(0.9), vjust= -0.2, size=7)  + scale_fill_manual(values=c("#f4cccc","#b3402e")) +
+  theme_light(base_size=15) + theme(legend.title=element_blank())
+
+Graf_9EF_LP
+
+## 9 Ano EF MAT
+
+Graf_9EF_MAT <- ggplot(DataGraf, aes(fill= infra, y=prop_9EF_MAT, x= Agregado)) +
+  geom_bar(position="dodge", stat="identity") + ggtitle("Aprendizagem adequada em MAT para alunos do 9ª Ano do Ensino Fundamental (2019)") +
+  xlab("") + ylab("") + geom_text(aes(label = prop_9EF_MAT), position= position_dodge(0.9), vjust= -0.2, size=7)  + scale_fill_manual(values=c("#f4cccc","#b3402e")) +
+  theme_light(base_size=15) + theme(legend.title=element_blank())
+
+Graf_9EF_MAT
+
+#rabela para exportar os resultados 
+Resultado_Final <- data.frame(
+  Etapa = rep(c("5º EF", "5º EF", "9º EF", "9º EF"), each = 10),
+  Disciplina = rep(c("Língua Portuguesa", "Matemática",
+                     "Língua Portuguesa", "Matemática"), each = 10),
+  Agregado = rep(rep(c("BR", "ES"), 5), 4),
+  Raca = rep(c("Branco", "Preto", "Pardo", "Amarela", "Indígena"),
+             each = 2, times = 4),
+  Aprendizagem_Adequada = c(
+    prop_5EF_LP,
+    prop_5EF_MAT,
+    prop_9EF_LP,
+    prop_9EF_MAT
+  )
+)
+
+Resultado_Final
+
+library(writexl)
+
+write_xlsx(Resultado_Final,
+           "Resultado_SAEB_2023_BR_ES.xlsx")
