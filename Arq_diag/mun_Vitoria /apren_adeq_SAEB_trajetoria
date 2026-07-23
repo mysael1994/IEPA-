@@ -1,0 +1,531 @@
+#analise de trajetória Aprendizagem adequada - Saeb-ES
+
+# ============================================================
+# SAEB — SÉRIE HISTÓRICA DA APRENDIZAGEM ADEQUADA
+# BRASIL E ESPÍRITO SANTO, POR RAÇA/COR
+# 5º E 9º ANOS DO ENSINO FUNDAMENTAL
+# ============================================================
+
+library(basedosdados)
+library(dplyr)
+library(tidyr)
+library(writexl)
+
+# Projeto de cobrança do Google Cloud
+set_billing_id("mahin-dados")
+
+
+# ============================================================
+# 1. FUNÇÃO PARA CALCULAR A APRENDIZAGEM ADEQUADA
+# ============================================================
+
+calcular_serie_saeb <- function(tabela, etapa) {
+  
+  # Pontos de corte de aprendizagem adequada
+  if (etapa == "5º ano") {
+    
+    corte_lp  <- 200
+    corte_mat <- 225
+    
+  } else if (etapa == "9º ano") {
+    
+    corte_lp  <- 275
+    corte_mat <- 300
+    
+  } else {
+    
+    stop("A etapa deve ser '5º ano' ou '9º ano'.")
+    
+  }
+  
+  consulta <- paste0(
+    "
+    WITH base AS (
+
+      SELECT
+        ano,
+        sigla_uf,
+        disciplina,
+        raca_cor,
+        proficiencia_saeb,
+        peso_aluno
+
+      FROM `", tabela, "`
+
+      WHERE disciplina IN ('LP', 'MT')
+        AND raca_cor IN ('A', 'B', 'C', 'D', 'E')
+        AND proficiencia_saeb IS NOT NULL
+        AND peso_aluno IS NOT NULL
+        AND peso_aluno > 0
+    ),
+
+    territorios AS (
+
+      -- Resultado para o Brasil
+      SELECT
+        ano,
+        'Brasil' AS agregado,
+        disciplina,
+        raca_cor,
+        proficiencia_saeb,
+        peso_aluno
+      FROM base
+
+      UNION ALL
+
+      -- Resultado específico para o Espírito Santo
+      SELECT
+        ano,
+        'Espírito Santo' AS agregado,
+        disciplina,
+        raca_cor,
+        proficiencia_saeb,
+        peso_aluno
+      FROM base
+      WHERE sigla_uf = 'ES'
+    )
+
+    SELECT
+      ano,
+      agregado,
+      disciplina,
+      raca_cor,
+
+      SAFE_DIVIDE(
+        SUM(
+          peso_aluno *
+          CASE
+            WHEN disciplina = 'LP'
+                 AND proficiencia_saeb >= ", corte_lp, "
+              THEN 1
+
+            WHEN disciplina = 'MT'
+                 AND proficiencia_saeb >= ", corte_mat, "
+              THEN 1
+
+            ELSE 0
+          END
+        ),
+        SUM(peso_aluno)
+      ) AS aprendizagem_adequada,
+
+      COUNT(*) AS numero_observacoes,
+      SUM(peso_aluno) AS soma_pesos
+
+    FROM territorios
+
+    GROUP BY
+      ano,
+      agregado,
+      disciplina,
+      raca_cor
+
+    ORDER BY
+      ano,
+      disciplina,
+      raca_cor,
+      agregado
+    "
+  )
+  
+  resultado <- basedosdados::read_sql(consulta)
+  
+  resultado %>%
+    mutate(
+      Etapa = etapa,
+      
+      Disciplina = case_when(
+        disciplina == "LP" ~ "Língua Portuguesa",
+        disciplina == "MT" ~ "Matemática",
+        TRUE ~ disciplina
+      ),
+      
+      Raca = case_when(
+        raca_cor == "A" ~ "Branco",
+        raca_cor == "B" ~ "Preto",
+        raca_cor == "C" ~ "Pardo",
+        raca_cor == "D" ~ "Amarela",
+        raca_cor == "E" ~ "Indígena",
+        TRUE ~ NA_character_
+      ),
+      
+      # Valor de 0 a 100, mais fácil para trabalhar no Excel
+      Aprendizagem_Adequada = aprendizagem_adequada * 100
+    ) %>%
+    select(
+      Ano = ano,
+      Etapa,
+      Disciplina,
+      Agregado = agregado,
+      Raca,
+      Aprendizagem_Adequada,
+      Numero_Observacoes = numero_observacoes,
+      Soma_Pesos = soma_pesos
+    ) %>%
+    arrange(
+      Ano,
+      Disciplina,
+      factor(
+        Raca,
+        levels = c(
+          "Branco",
+          "Pardo",
+          "Preto",
+          "Amarela",
+          "Indígena"
+        )
+      ),
+      Agregado
+    )
+}
+
+
+# ============================================================
+# 2. CALCULAR RESULTADOS DO 5º ANO
+# ============================================================
+
+resultado_5ano <- calcular_serie_saeb(
+  tabela = "basedosdados.br_inep_saeb.aluno_ef_5ano",
+  etapa  = "5º ano"
+)
+
+
+# ============================================================
+# 3. CALCULAR RESULTADOS DO 9º ANO
+# ============================================================
+
+resultado_9ano <- calcular_serie_saeb(
+  tabela = "basedosdados.br_inep_saeb.aluno_ef_9ano",
+  etapa  = "9º ano"
+)
+
+
+# ============================================================
+# 4. JUNTAR AS DUAS ETAPAS
+# ============================================================
+
+resultado_completo <- bind_rows(
+  resultado_5ano,
+  resultado_9ano
+)
+
+
+# Conferir os anos encontrados na base
+sort(unique(resultado_completo$Ano))
+
+# Quantidade de observações por etapa e ano
+resultado_completo %>%
+  count(Etapa, Ano)
+
+
+# ============================================================
+# 5. TABELAS EM FORMATO LARGO PARA O EXCEL
+# ============================================================
+#
+# Cada linha representa:
+# Ano + disciplina + raça/cor
+#
+# As colunas Brasil e Espírito Santo podem ser usadas
+# diretamente para construir os gráficos de linha.
+# ============================================================
+
+tabela_5ano_excel <- resultado_5ano %>%
+  select(
+    Ano,
+    Disciplina,
+    Raca,
+    Agregado,
+    Aprendizagem_Adequada
+  ) %>%
+  pivot_wider(
+    names_from  = Agregado,
+    values_from = Aprendizagem_Adequada
+  ) %>%
+  arrange(
+    Disciplina,
+    factor(
+      Raca,
+      levels = c(
+        "Branco",
+        "Pardo",
+        "Preto",
+        "Amarela",
+        "Indígena"
+      )
+    ),
+    Ano
+  )
+
+
+tabela_9ano_excel <- resultado_9ano %>%
+  select(
+    Ano,
+    Disciplina,
+    Raca,
+    Agregado,
+    Aprendizagem_Adequada
+  ) %>%
+  pivot_wider(
+    names_from  = Agregado,
+    values_from = Aprendizagem_Adequada
+  ) %>%
+  arrange(
+    Disciplina,
+    factor(
+      Raca,
+      levels = c(
+        "Branco",
+        "Pardo",
+        "Preto",
+        "Amarela",
+        "Indígena"
+      )
+    ),
+    Ano
+  )
+
+
+# ============================================================
+# 6. CONFERIR AS TABELAS
+# ============================================================
+
+View(tabela_5ano_excel)
+View(tabela_9ano_excel)
+
+head(tabela_5ano_excel)
+head(tabela_9ano_excel)
+
+
+# ============================================================
+# 7. EXPORTAR PARA EXCEL
+# ============================================================
+
+write_xlsx(
+  list(
+    "5_ano_grafico" = tabela_5ano_excel,
+    "9_ano_grafico" = tabela_9ano_excel,
+    "Base_completa" = resultado_completo
+  ),
+  path = "Serie_Historica_SAEB_BR_ES_Raca.xlsx"
+)
+
+# ============================================================
+# TABELA FINAL EM FORMATO PAINEL
+# ============================================================
+
+tabela_painel <- resultado_completo %>%
+  mutate(
+    # Converter o ano de integer64 para inteiro comum
+    Ano = as.integer(Ano),
+    
+    # Definir a ordem das categorias
+    Etapa = factor(
+      Etapa,
+      levels = c("5º ano", "9º ano")
+    ),
+    
+    Disciplina = factor(
+      Disciplina,
+      levels = c("Língua Portuguesa", "Matemática")
+    ),
+    
+    Agregado = factor(
+      Agregado,
+      levels = c("Brasil", "Espírito Santo")
+    ),
+    
+    Raca = factor(
+      Raca,
+      levels = c(
+        "Branco",
+        "Pardo",
+        "Preto",
+        "Amarela",
+        "Indígena"
+      )
+    ),
+    
+    # Arredondar apenas para apresentação no Excel
+    Aprendizagem_Adequada = round(
+      Aprendizagem_Adequada,
+      digits = 1
+    )
+  ) %>%
+  arrange(
+    Etapa,
+    Disciplina,
+    Raca,
+    Agregado,
+    Ano
+  ) %>%
+  select(
+    Ano,
+    Etapa,
+    Disciplina,
+    Agregado,
+    Raca,
+    Aprendizagem_Adequada,
+    Numero_Observacoes,
+    Soma_Pesos
+  )
+
+library(ggplot2)
+library(scales)
+library(dplyr)
+
+# ============================================================
+# GRÁFICO — SÉRIE HISTÓRICA DO 5º ANO
+# ============================================================
+
+grafico_5ano <- tabela_painel %>%
+  filter(Etapa == "5º ano") %>%
+  ggplot(
+    aes(
+      x = Ano,
+      y = Aprendizagem_Adequada,
+      color = Raca,
+      group = Raca
+    )
+  ) +
+  geom_line(
+    linewidth = 1
+  ) +
+  geom_point(
+    size = 2.2
+  ) +
+  facet_grid(
+    Disciplina ~ Agregado
+  ) +
+  scale_x_continuous(
+    breaks = sort(unique(tabela_painel$Ano))
+  ) +
+  scale_y_continuous(
+    labels = label_number(
+      suffix = "%",
+      decimal.mark = ","
+    ),
+    limits = c(0, 100),
+    breaks = seq(0, 100, 20)
+  ) +
+  labs(
+    title = "Trajetória da aprendizagem adequada no 5º ano",
+    subtitle = paste(
+      "Brasil e Espírito Santo, segundo raça/cor",
+      "e disciplina — Saeb, 2005–2023"
+    ),
+    x = "Ano do Saeb",
+    y = "Estudantes com aprendizagem adequada (%)",
+    color = "Raça/cor",
+    caption = paste(
+      "Nota: aprendizagem adequada corresponde aos níveis",
+      "Proficiente e Avançado da escala do Saeb."
+    )
+  ) +
+  theme_minimal(
+    base_size = 12
+  ) +
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      size = 15
+    ),
+    plot.subtitle = element_text(
+      size = 11
+    ),
+    strip.text = element_text(
+      face = "bold",
+      size = 10
+    ),
+    legend.position = "bottom",
+    legend.title = element_text(
+      face = "bold"
+    ),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    plot.caption = element_text(
+      hjust = 0,
+      size = 9
+    )
+  )
+
+grafico_5ano
+
+# ============================================================
+# GRÁFICO — SÉRIE HISTÓRICA DO 9º ANO
+# ============================================================
+
+grafico_9ano <- tabela_painel %>%
+  filter(Etapa == "9º ano") %>%
+  ggplot(
+    aes(
+      x = Ano,
+      y = Aprendizagem_Adequada,
+      color = Raca,
+      group = Raca
+    )
+  ) +
+  geom_line(
+    linewidth = 1
+  ) +
+  geom_point(
+    size = 2.2
+  ) +
+  facet_grid(
+    Disciplina ~ Agregado
+  ) +
+  scale_x_continuous(
+    breaks = sort(unique(tabela_painel$Ano))
+  ) +
+  scale_y_continuous(
+    labels = label_number(
+      suffix = "%",
+      decimal.mark = ","
+    ),
+    limits = c(0, 100),
+    breaks = seq(0, 100, 20)
+  ) +
+  labs(
+    title = "Trajetória da aprendizagem adequada no 9º ano",
+    subtitle = paste(
+      "Brasil e Espírito Santo, segundo raça/cor",
+      "e disciplina — Saeb, 2005–2023"
+    ),
+    x = "Ano do Saeb",
+    y = "Estudantes com aprendizagem adequada (%)",
+    color = "Raça/cor",
+    caption = paste(
+      "Nota: aprendizagem adequada corresponde aos níveis",
+      "Proficiente e Avançado da escala do Saeb."
+    )
+  ) +
+  theme_minimal(
+    base_size = 12
+  ) +
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      size = 15
+    ),
+    strip.text = element_text(
+      face = "bold",
+      size = 10
+    ),
+    legend.position = "bottom",
+    legend.title = element_text(
+      face = "bold"
+    ),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    plot.caption = element_text(
+      hjust = 0,
+      size = 9
+    )
+  )
+
+grafico_9ano
