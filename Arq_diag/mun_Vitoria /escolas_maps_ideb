@@ -1,0 +1,757 @@
+################################################################################
+# DIAGNÓSTICO TERRITORIAL DO IDEB POR ESCOLA
+# Exemplo aplicado ao município de Vitória (ES)
+#
+# Objetivo:
+#   1. Obter os dados do IDEB por escola;
+#   2. Ler os microdados do Censo Escolar salvos no computador;
+#   3. Integrar as bases pelo código da escola;
+#   4. Ler a malha territorial de bairros do IBGE;
+#   5. Criar mapas das escolas com os maiores e menores IDEBs;
+#   6. Exportar os mapas em PNG e PDF.
+#
+# ADAPTAÇÃO PARA OUTRO MUNICÍPIO OU ESTADO:
+#   Altere somente os parâmetros reunidos na ETAPA 2 e confira os nomes das
+#   colunas caso utilize outra edição do Censo Escolar.
+################################################################################
+
+
+# ==============================================================================
+# ETAPA 1 — PACOTES
+# ==============================================================================
+
+# Execute apenas uma vez, caso os pacotes ainda não estejam instalados:
+# install.packages(c(
+#   "basedosdados", "dplyr", "tidyr", "sf", "ggplot2", "ggrepel"
+# ))
+
+library(basedosdados)
+library(dplyr)
+library(tidyr)
+library(sf)
+library(ggplot2)
+library(ggrepel)
+
+
+# ==============================================================================
+# ETAPA 2 — PARÂMETROS GERAIS DO ESTUDO
+# ==============================================================================
+# Para reproduzir a análise em outro local, ajuste este bloco antes de executar
+# as demais etapas.
+
+# Unidade da Federação
+uf_selecionada <- "ES"
+
+# Código IBGE do município — Vitória (ES)
+codigo_municipio <- "3205309"
+
+# Nome utilizado nos títulos e objetos
+nome_municipio <- "Vitória"
+
+# Ano do IDEB analisado
+ano_ideb <- 2023
+
+# Ano do arquivo do Censo Escolar utilizado
+ano_censo <- 2025
+
+# Proporção de escolas selecionadas em cada extremo da distribuição
+# 0.20 corresponde aos 20% menores e aos 20% maiores IDEBs.
+proporcao_extremos <- 0.20
+
+# Projeto do Google Cloud utilizado para consultar a Base dos Dados
+# Mantenha ou substitua pelo seu próprio billing project.
+set_billing_id("ideb-412717")
+
+# Caminho do arquivo ZIP do Censo Escolar baixado no computador
+caminho_zip_censo <- paste0(
+  "C:/Users/Mysael Justino/Documents/",
+  "microdados_censo_escolar_", ano_censo, "_.zip"
+)
+
+# Caminho interno da tabela de escolas dentro do ZIP
+arquivo_escolas_no_zip <- paste0(
+  "microdados_censo_escolar_", ano_censo,
+  "/dados/Tabela_Escola_", ano_censo, ".csv"
+)
+
+# Pasta onde a malha de bairros foi descompactada
+pasta_bairros <- "C:/Users/Mysael Justino/Documents/ES_bairros_CD2022"
+
+# Caminho do shapefile de bairros
+arquivo_bairros <- file.path(
+  pasta_bairros,
+  "ES_bairros_CD2022.shp"
+)
+
+# Pasta onde os mapas serão salvos
+# Use "." para salvar na pasta de trabalho atual.
+pasta_saida <- "."
+
+# CRS geográfico utilizado nas coordenadas das escolas — SIRGAS 2000
+crs_geografico <- 4674
+
+# CRS projetado utilizado para o Espírito Santo — SIRGAS 2000 / UTM 24S
+# Para outro estado, confira qual zona UTM é apropriada.
+crs_projetado <- 31984
+
+
+# ==============================================================================
+# ETAPA 3 — CONSULTA DOS DADOS DO IDEB
+# ==============================================================================
+# Fonte: Base dos Dados / INEP.
+#
+# Tabelas disponíveis:
+#   Brasil:    br_inep_ideb.brasil
+#   Região:    br_inep_ideb.regiao
+#   UF:        br_inep_ideb.uf
+#   Município: br_inep_ideb.municipio
+#   Escola:    br_inep_ideb.escola
+#
+# A consulta abaixo já restringe os dados à rede municipal, à UF e ao ano
+# definidos na ETAPA 2. Isso reduz o volume transferido e facilita a adaptação.
+
+consulta_ideb <- sprintf(
+  "
+  SELECT *
+  FROM `basedosdados.br_inep_ideb.escola`
+  WHERE rede = 'municipal'
+    AND sigla_uf = '%s'
+    AND ano = %s
+  ",
+  uf_selecionada,
+  ano_ideb
+)
+
+IDEB_UF <- basedosdados::read_sql(consulta_ideb)
+
+# Conferências iniciais
+dim(IDEB_UF)
+names(IDEB_UF)
+length(unique(IDEB_UF$id_municipio))
+
+# Seleciona apenas o município de interesse.
+# as.character() evita problemas quando o código chega como número em uma base
+# e como texto em outra.
+ideb_municipio <- IDEB_UF %>%
+  mutate(id_municipio = as.character(id_municipio)) %>%
+  filter(id_municipio == codigo_municipio)
+
+# Conferências
+nrow(ideb_municipio)
+table(ideb_municipio$anos_escolares, useNA = "ifany")
+
+
+# ==============================================================================
+# ETAPA 4 — ESTATÍSTICAS DESCRITIVAS DO IDEB POR MUNICÍPIO (OPCIONAL)
+# ==============================================================================
+# Este bloco reproduz o cálculo das médias e medidas de dispersão para todos os
+# municípios da UF consultada. Não é necessário para a produção dos mapas, mas
+# pode ser útil para comparações estaduais.
+
+medideb <- IDEB_UF %>%
+  group_by(ano, id_municipio, anos_escolares) %>%
+  summarise(
+    media  = round(mean(ideb, na.rm = TRUE), 1),
+    pquan  = round(quantile(ideb, 0.25, na.rm = TRUE), 1),
+    tquan  = round(quantile(ideb, 0.75, na.rm = TRUE), 1),
+    desvio = round(sd(ideb, na.rm = TRUE), 1),
+    min    = round(min(ideb, na.rm = TRUE), 1),
+    max    = round(max(ideb, na.rm = TRUE), 1),
+    .groups = "drop"
+  )
+
+# Exemplo original: principais municípios do Espírito Santo.
+# Para outra UF, substitua os códigos abaixo.
+ideb_MUNPRI <- medideb %>%
+  mutate(id_municipio = as.character(id_municipio)) %>%
+  filter(
+    id_municipio %in% c(
+      "3205309", # Vitória
+      "3205002", # Serra
+      "3205200", # Vila Velha
+      "3201308", # Cariacica
+      "3203205"  # Linhares
+    )
+  ) %>%
+  select(ano, id_municipio, anos_escolares, media)
+
+
+# ==============================================================================
+# ETAPA 5 — LEITURA DOS MICRODADOS DO CENSO ESCOLAR
+# ==============================================================================
+# O arquivo permanece compactado. A função unz() permite ler diretamente a
+# tabela existente dentro do ZIP, sem precisar extrair todo o conteúdo.
+#
+# Caminho mantido conforme o arquivo baixado no computador:
+# C:/Users/Mysael Justino/Documents/microdados_censo_escolar_2025_.zip
+
+# Lista os arquivos internos do ZIP, caso seja necessário conferir o nome:
+# unzip(caminho_zip_censo, list = TRUE)
+
+Infraescola <- read.csv(
+  unz(caminho_zip_censo, arquivo_escolas_no_zip),
+  sep = ";",
+  fileEncoding = "Latin1"
+)
+
+# Conferências
+dim(Infraescola)
+names(Infraescola)
+
+# Observação metodológica:
+# Nesta aplicação, o IDEB é de 2023 e as informações de localização da escola
+# são provenientes do Censo Escolar de 2025. Ao adaptar o script, é recomendável
+# usar a edição do Censo mais adequada ao objetivo da análise e verificar se
+# houve mudança de nome, código, localização ou situação de funcionamento.
+
+
+# ==============================================================================
+# ETAPA 6 — INTEGRAÇÃO DO IDEB COM O CENSO ESCOLAR
+# ==============================================================================
+# Chave de ligação:
+#   IDEB:         id_escola
+#   Censo Escolar: CO_ENTIDADE
+
+Vitoria_ESColas <- ideb_municipio %>%
+  mutate(id_escola = as.character(id_escola)) %>%
+  inner_join(
+    Infraescola %>%
+      mutate(CO_ENTIDADE = as.character(CO_ENTIDADE)),
+    by = c("id_escola" = "CO_ENTIDADE")
+  ) %>%
+  drop_na(ideb)
+
+# Conferências da junção
+nrow(Vitoria_ESColas)
+names(Vitoria_ESColas)
+table(Vitoria_ESColas$anos_escolares, useNA = "ifany")
+
+
+# ==============================================================================
+# ETAPA 7 — LEITURA DA MALHA TERRITORIAL DE BAIRROS
+# ==============================================================================
+# Fonte da malha:
+# IBGE — Malhas de Setores Censitários e Divisões Intramunicipais,
+# Censo Demográfico 2022, bairros, formato shapefile por UF.
+#
+# Página de download utilizada:
+# https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/
+# malhas_de_setores_censitarios__divisoes_intramunicipais/censo_2022/
+# bairros/shp/UF/
+#
+# Arquivo do Espírito Santo:
+# ES_bairros_CD2022.zip
+#
+# Após o download, o arquivo foi descompactado na pasta:
+# C:/Users/Mysael Justino/Documents/ES_bairros_CD2022
+#
+# Para outro estado:
+#   1. baixe o ZIP correspondente à UF;
+#   2. descompacte-o;
+#   3. altere pasta_bairros e arquivo_bairros na ETAPA 2.
+
+list.files(pasta_bairros)
+
+bairros <- st_read(
+  arquivo_bairros,
+  quiet = TRUE
+)
+
+# Seleciona somente os bairros do município de interesse.
+bairros_municipio <- bairros %>%
+  mutate(CD_MUN = as.character(CD_MUN)) %>%
+  filter(CD_MUN == codigo_municipio)
+
+# Conferências
+nrow(bairros_municipio)
+unique(bairros_municipio$NM_MUN)
+
+bairros_municipio %>%
+  st_drop_geometry() %>%
+  select(CD_BAIRRO, NM_BAIRRO)
+
+# Confere o sistema de referência original
+st_crs(bairros_municipio)
+
+# Transforma a malha para o CRS projetado definido na ETAPA 2.
+# A projeção métrica melhora o posicionamento e a representação dos elementos.
+bairros_municipio_utm <- bairros_municipio %>%
+  st_transform(crs_projetado)
+
+
+# ==============================================================================
+# ETAPA 8 — GRÁFICOS DE CONFERÊNCIA DA MALHA
+# ==============================================================================
+# Estes gráficos servem apenas para verificar se:
+#   - a malha foi lida corretamente;
+#   - o município filtrado é o esperado;
+#   - os nomes dos bairros estão disponíveis;
+#   - a transformação de projeção funcionou.
+
+# 8.1 — Malha sem nomes
+grafico_malha <- ggplot(bairros_municipio) +
+  geom_sf(
+    fill = "white",
+    color = "grey40",
+    linewidth = 0.3
+  ) +
+  theme_void()
+
+grafico_malha
+
+# 8.2 — Malha com os nomes dos bairros
+grafico_malha_rotulos <- ggplot(bairros_municipio_utm) +
+  geom_sf(
+    fill = "white",
+    color = "grey50",
+    linewidth = 0.3
+  ) +
+  geom_sf_text(
+    aes(label = NM_BAIRRO),
+    size = 2
+  ) +
+  theme_void()
+
+grafico_malha_rotulos
+
+
+# ==============================================================================
+# ETAPA 9 — PREPARAÇÃO DAS ESCOLAS PARA O MAPA
+# ==============================================================================
+# Seleciona somente as variáveis necessárias.
+# Caso outra edição do Censo use nomes diferentes para latitude e longitude,
+# ajuste os campos nesta etapa.
+
+escolas_mapa <- Vitoria_ESColas %>%
+  select(
+    id_escola,
+    NO_ENTIDADE,
+    NO_BAIRRO,
+    ano,
+    anos_escolares,
+    ideb,
+    LATITUDE,
+    LONGITUDE
+  )
+
+# Conferências
+str(escolas_mapa)
+head(escolas_mapa)
+
+# Mantém o filtro explícito do ano, mesmo que a consulta SQL já tenha aplicado
+# essa condição. Isso facilita a leitura e protege o fluxo caso a consulta seja
+# posteriormente ampliada para vários anos.
+escolas_mapa_ano <- escolas_mapa %>%
+  filter(ano == ano_ideb) %>%
+  drop_na(LATITUDE, LONGITUDE, ideb)
+
+# Converte as coordenadas em pontos espaciais.
+escolas_sf_ano <- st_as_sf(
+  escolas_mapa_ano,
+  coords = c("LONGITUDE", "LATITUDE"),
+  crs = crs_geografico,
+  remove = FALSE
+) %>%
+  st_transform(crs_projetado)
+
+# Confere visualmente a sobreposição entre escolas e bairros.
+grafico_conferencia_escolas <- ggplot() +
+  geom_sf(
+    data = bairros_municipio_utm,
+    fill = "grey95",
+    color = "grey60",
+    linewidth = 0.3
+  ) +
+  geom_sf(
+    data = escolas_sf_ano,
+    size = 2
+  ) +
+  theme_void()
+
+grafico_conferencia_escolas
+
+
+# ==============================================================================
+# ETAPA 10 — GRÁFICO EXPLORATÓRIO DO IDEB DOS ANOS INICIAIS
+# ==============================================================================
+# Este gráfico mostra todas as escolas dos anos iniciais e utiliza uma escala
+# contínua de cor para representar o IDEB.
+
+escolas_iniciais_ano <- escolas_sf_ano %>%
+  filter(anos_escolares == "iniciais (1-5)")
+
+grafico_ideb_iniciais <- ggplot() +
+  geom_sf(
+    data = bairros_municipio_utm,
+    fill = "grey95",
+    color = "white",
+    linewidth = 0.3
+  ) +
+  geom_sf(
+    data = escolas_iniciais_ano,
+    aes(color = ideb),
+    size = 3
+  ) +
+  labs(
+    title = paste(
+      "IDEB dos anos iniciais nas escolas municipais de",
+      nome_municipio
+    ),
+    subtitle = paste("Resultados de", ano_ideb),
+    color = "IDEB",
+    caption = paste0(
+      "Fonte: IDEB ", ano_ideb,
+      " e Censo Escolar ", ano_censo, "."
+    )
+  ) +
+  theme_void()
+
+grafico_ideb_iniciais
+
+
+# ==============================================================================
+# ETAPA 11 — SELEÇÃO DOS 20% MENORES E 20% MAIORES IDEBs
+# ==============================================================================
+# A quantidade de escolas é calculada separadamente em cada etapa de ensino.
+# round() aproxima o resultado para o número inteiro mais próximo.
+#
+# IMPORTANTE:
+# O cálculo deve considerar somente escolas com IDEB válido. Por isso, a base
+# é filtrada antes da contagem.
+
+base_iniciais <- escolas_sf_ano %>%
+  filter(
+    anos_escolares == "iniciais (1-5)",
+    !is.na(ideb)
+  ) %>%
+  arrange(ideb)
+
+base_finais <- escolas_sf_ano %>%
+  filter(
+    anos_escolares == "finais (6-9)",
+    !is.na(ideb)
+  ) %>%
+  arrange(ideb)
+
+n_iniciais <- round(nrow(base_iniciais) * proporcao_extremos)
+n_finais   <- round(nrow(base_finais) * proporcao_extremos)
+
+# Garante pelo menos uma escola em cada extremo, caso a base seja pequena.
+n_iniciais <- max(1, n_iniciais)
+n_finais   <- max(1, n_finais)
+
+iniciais_extremos <- bind_rows(
+  base_iniciais %>%
+    slice_head(n = n_iniciais) %>%
+    mutate(grupo = "20% menores IDEBs"),
+  base_iniciais %>%
+    slice_tail(n = n_iniciais) %>%
+    mutate(grupo = "20% maiores IDEBs")
+)
+
+finais_extremos <- bind_rows(
+  base_finais %>%
+    slice_head(n = n_finais) %>%
+    mutate(grupo = "20% menores IDEBs"),
+  base_finais %>%
+    slice_tail(n = n_finais) %>%
+    mutate(grupo = "20% maiores IDEBs")
+)
+
+# Define a ordem da legenda.
+iniciais_extremos <- iniciais_extremos %>%
+  mutate(
+    grupo = factor(
+      grupo,
+      levels = c("20% menores IDEBs", "20% maiores IDEBs")
+    )
+  )
+
+finais_extremos <- finais_extremos %>%
+  mutate(
+    grupo = factor(
+      grupo,
+      levels = c("20% menores IDEBs", "20% maiores IDEBs")
+    )
+  )
+
+# Conferências
+n_iniciais
+n_finais
+
+table(iniciais_extremos$grupo)
+table(finais_extremos$grupo)
+
+# Tabelas com as escolas selecionadas
+tabela_iniciais_extremos <- iniciais_extremos %>%
+  st_drop_geometry() %>%
+  select(NO_ENTIDADE, NO_BAIRRO, ideb, grupo) %>%
+  arrange(ideb)
+
+tabela_finais_extremos <- finais_extremos %>%
+  st_drop_geometry() %>%
+  select(NO_ENTIDADE, NO_BAIRRO, ideb, grupo) %>%
+  arrange(ideb)
+
+tabela_iniciais_extremos
+tabela_finais_extremos
+
+
+# ==============================================================================
+# ETAPA 12 — CONSTRUÇÃO DOS MAPAS FINAIS
+# ==============================================================================
+# st_point_on_surface() cria um ponto interno em cada polígono para posicionar
+# os nomes dos bairros. É preferível ao centróide em polígonos irregulares,
+# porque reduz a chance de o rótulo ficar fora do bairro.
+
+bairros_rotulos <- bairros_municipio_utm %>%
+  st_point_on_surface()
+
+# Paleta mantida conforme o script original.
+cores_grupos <- c(
+  "20% menores IDEBs" = "#D73027",
+  "20% maiores IDEBs" = "#2166AC"
+)
+
+
+# ------------------------------------------------------------------------------
+# 12.1 — MAPA DOS ANOS INICIAIS
+# ------------------------------------------------------------------------------
+
+mapa_iniciais <- ggplot() +
+  # Camada 1: limites dos bairros
+  geom_sf(
+    data = bairros_municipio_utm,
+    fill = "grey95",
+    color = "grey65",
+    linewidth = 0.3
+  ) +
+  # Camada 2: nomes dos bairros
+  geom_sf_text(
+    data = bairros_rotulos,
+    aes(label = NM_BAIRRO),
+    size = 2,
+    color = "grey35"
+  ) +
+  # Camada 3: escolas selecionadas
+  geom_sf(
+    data = iniciais_extremos,
+    aes(color = grupo, size = ideb),
+    alpha = 0.9
+  ) +
+  # Camada 4: cores dos grupos
+  scale_color_manual(values = cores_grupos) +
+  # Camada 5: títulos, legenda e fonte
+  labs(
+    title = "Escolas com maiores e menores IDEBs nos anos iniciais",
+    subtitle = paste0(
+      "20% maiores e 20% menores resultados — ",
+      nome_municipio, ", ", ano_ideb
+    ),
+    color = NULL,
+    size = "IDEB",
+    caption = paste0(
+      "Fonte: IDEB ", ano_ideb,
+      " e Censo Escolar ", ano_censo, "."
+    )
+  ) +
+  # Camada 6: acabamento visual
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 10)
+  )
+
+mapa_iniciais
+
+
+# ------------------------------------------------------------------------------
+# 12.2 — MAPA DOS ANOS FINAIS
+# ------------------------------------------------------------------------------
+
+mapa_finais <- ggplot() +
+  # Camada 1: limites dos bairros
+  geom_sf(
+    data = bairros_municipio_utm,
+    fill = "grey95",
+    color = "grey65",
+    linewidth = 0.3
+  ) +
+  # Camada 2: nomes dos bairros
+  geom_sf_text(
+    data = bairros_rotulos,
+    aes(label = NM_BAIRRO),
+    size = 2,
+    color = "grey35"
+  ) +
+  # Camada 3: escolas selecionadas
+  geom_sf(
+    data = finais_extremos,
+    aes(color = grupo, size = ideb),
+    alpha = 0.9
+  ) +
+  # Camada 4: cores dos grupos
+  scale_color_manual(values = cores_grupos) +
+  # Camada 5: títulos, legenda e fonte
+  labs(
+    title = "Escolas com maiores e menores IDEBs nos anos finais",
+    subtitle = paste0(
+      "20% maiores e 20% menores resultados — ",
+      nome_municipio, ", ", ano_ideb
+    ),
+    color = NULL,
+    size = "IDEB",
+    caption = paste0(
+      "Fonte: IDEB ", ano_ideb,
+      " e Censo Escolar ", ano_censo, "."
+    )
+  ) +
+  # Camada 6: acabamento visual
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 10)
+  )
+
+mapa_finais
+
+
+# ==============================================================================
+# ETAPA 13 — EXPORTAÇÃO DOS MAPAS
+# ==============================================================================
+# Os nomes dos arquivos são construídos automaticamente com o município e o ano.
+# O PNG em 600 dpi é adequado para apresentações e documentos.
+# O PDF preserva o formato vetorial e é indicado para impressão.
+
+nome_municipio_arquivo <- gsub(
+  "[^[:alnum:]]+",
+  "_",
+  iconv(nome_municipio, to = "ASCII//TRANSLIT")
+)
+
+arquivo_png_iniciais <- file.path(
+  pasta_saida,
+  paste0(
+    "mapa_ideb_anos_iniciais_",
+    nome_municipio_arquivo, "_", ano_ideb, ".png"
+  )
+)
+
+arquivo_png_finais <- file.path(
+  pasta_saida,
+  paste0(
+    "mapa_ideb_anos_finais_",
+    nome_municipio_arquivo, "_", ano_ideb, ".png"
+  )
+)
+
+arquivo_pdf_iniciais <- file.path(
+  pasta_saida,
+  paste0(
+    "mapa_ideb_anos_iniciais_",
+    nome_municipio_arquivo, "_", ano_ideb, ".pdf"
+  )
+)
+
+arquivo_pdf_finais <- file.path(
+  pasta_saida,
+  paste0(
+    "mapa_ideb_anos_finais_",
+    nome_municipio_arquivo, "_", ano_ideb, ".pdf"
+  )
+)
+
+# Exportação em PNG
+ggsave(
+  filename = arquivo_png_iniciais,
+  plot = mapa_iniciais,
+  width = 14,
+  height = 10,
+  units = "in",
+  dpi = 600,
+  bg = "white"
+)
+
+ggsave(
+  filename = arquivo_png_finais,
+  plot = mapa_finais,
+  width = 14,
+  height = 10,
+  units = "in",
+  dpi = 600,
+  bg = "white"
+)
+
+# Exportação em PDF
+ggsave(
+  filename = arquivo_pdf_iniciais,
+  plot = mapa_iniciais,
+  width = 14,
+  height = 10,
+  units = "in",
+  device = cairo_pdf,
+  bg = "white"
+)
+
+ggsave(
+  filename = arquivo_pdf_finais,
+  plot = mapa_finais,
+  width = 14,
+  height = 10,
+  units = "in",
+  device = cairo_pdf,
+  bg = "white"
+)
+
+
+# ==============================================================================
+# ETAPA 14 — CONFERÊNCIA FINAL
+# ==============================================================================
+
+cat("\nAnálise concluída.\n")
+cat("Município:", nome_municipio, "\n")
+cat("UF:", uf_selecionada, "\n")
+cat("Ano do IDEB:", ano_ideb, "\n")
+cat("Escolas válidas — anos iniciais:", nrow(base_iniciais), "\n")
+cat("Escolas válidas — anos finais:", nrow(base_finais), "\n")
+cat("Selecionadas em cada extremo — anos iniciais:", n_iniciais, "\n")
+cat("Selecionadas em cada extremo — anos finais:", n_finais, "\n")
+cat("Arquivos salvos em:", normalizePath(pasta_saida), "\n")
+
+
+################################################################################
+# BLOCO OPCIONAL — SELEÇÃO FIXA DAS CINCO MENORES E CINCO MAIORES ESCOLAS
+################################################################################
+# Este bloco mantém a lógica utilizada na primeira versão da análise.
+# Ele não é necessário para os mapas finais baseados nos 20%, mas pode ser útil
+# caso seja desejada uma comparação com uma quantidade fixa de escolas.
+
+iniciais_10 <- bind_rows(
+  base_iniciais %>%
+    slice_head(n = 5) %>%
+    mutate(grupo = "5 menores IDEBs"),
+  base_iniciais %>%
+    slice_tail(n = 5) %>%
+    mutate(grupo = "5 maiores IDEBs")
+)
+
+finais_10 <- bind_rows(
+  base_finais %>%
+    slice_head(n = 5) %>%
+    mutate(grupo = "5 menores IDEBs"),
+  base_finais %>%
+    slice_tail(n = 5) %>%
+    mutate(grupo = "5 maiores IDEBs")
+)
+
+iniciais_10 %>%
+  st_drop_geometry() %>%
+  select(NO_ENTIDADE, NO_BAIRRO, ideb, grupo) %>%
+  arrange(ideb)
+
+finais_10 %>%
+  st_drop_geometry() %>%
+  select(NO_ENTIDADE, NO_BAIRRO, ideb, grupo) %>%
+  arrange(ideb)
