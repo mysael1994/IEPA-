@@ -1,0 +1,322 @@
+# dados sobre 9 e 5 ano fundamental 
+
+#dados 
+library("basedosdados")
+library(dplyr)
+library(tidyr)
+library(survey)
+
+
+# SAEB # 
+
+# Usando base dos dados #
+
+set_billing_id("mahin-381317")
+
+# Dicionario #
+query <- bdplyr("br_inep_saeb.dicionario")
+dicionario_Saeb <- bd_collect(query)
+
+
+# Abrindo base 5 ano EF e Selecionando apenas Sobral e rede municipal #
+Saeb_5EF <- basedosdados::read_sql('SELECT sigla_uf,id_regiao,id_municipio,id_aluno,rede,serie,proficiencia, disciplina,peso_aluno, escola_publica,
+                                     proficiencia_saeb,sexo,raca_cor,nivel_inse,inse FROM `basedosdados.br_inep_saeb.aluno_ef_5ano` WHERE ano =2023')
+
+# Abrindo base 9 ano EF e Selecionando apenas Sobral e rede municipal #
+Saeb_9EF <- basedosdados::read_sql('SELECT sigla_uf,id_regiao,id_municipio,id_aluno,rede,serie,proficiencia, disciplina,peso_aluno, escola_publica,
+                                     proficiencia_saeb,sexo,raca_cor,nivel_inse,inse,indicador_inse FROM `basedosdados.br_inep_saeb.aluno_ef_9ano` WHERE ano =2023')
+##tirando as NA
+#5ef
+Saeb_5EF <- Saeb_5EF %>% drop_na(proficiencia_saeb)
+Saeb_5EF <- Saeb_5EF %>% drop_na(peso_aluno)
+
+#9ef
+Saeb_9EF <- Saeb_9EF %>% drop_na(proficiencia_saeb)
+Saeb_9EF <- Saeb_9EF %>% drop_na(peso_aluno)
+
+# Codificando cor/raca 5EF
+#Saeb_5EF <- Saeb_5EF %>% mutate(raca = ifelse (raca_cor == "A","branco",
+#                                               ifelse(raca_cor %in% c("B","C"), "negro",
+#                                                      ifelse(raca_cor == "D","Amarela",
+#                                                             ifelse(raca_cor == "E","Indígena","ND")))))
+
+Saeb_5EF <- Saeb_5EF %>%
+  mutate(
+    raca = ifelse(raca_cor == "A", "Branco",
+                  ifelse(raca_cor == "B", "Preto",
+                         ifelse(raca_cor == "C", "Pardo",
+                                ifelse(raca_cor == "D", "Amarela",
+                                       ifelse(raca_cor == "E", "Indígena", "ND")))))
+  )
+
+
+
+# Codificando cor/raca 9EF
+#Saeb_9EF <- Saeb_9EF %>% mutate(raca = ifelse (raca_cor == "A","branco",
+#                                               ifelse(raca_cor %in% c("B","C"), "negro",
+#                                                      ifelse(raca_cor == "D","Amarela",
+#                                                             ifelse(raca_cor == "E","Indígena","ND")))))
+
+Saeb_9EF <- Saeb_9EF %>% mutate(raca = ifelse(raca_cor == "A", "Branco",
+                                              ifelse(raca_cor == "B", "Preto",
+                                                     ifelse(raca_cor == "C", "Pardo",
+                                                            ifelse(raca_cor == "D", "Amarela",
+                                                                   ifelse(raca_cor == "E", "Indígena", "ND")))))
+)
+
+
+#mantendo apenas escolas publicas e ES
+Saeb_5EF <- subset(Saeb_5EF, escola_publica == "1")
+Saeb_5EF <- subset(Saeb_5EF, sigla_uf == "ES")
+Saeb_9EF <- subset(Saeb_9EF, escola_publica == "1")
+Saeb_9EF <- subset(Saeb_9EF, sigla_uf == "ES")
+
+#"Insuficiente" = 1, "Basico" = 2, "Proficiente" = 3, "Avancado" = 4
+Esca_5ef <- Saeb_5EF %>% 
+  mutate(escala = ifelse(proficiencia_saeb < 0 & disciplina == "LP", "1",
+                         ifelse(proficiencia_saeb < 150 & proficiencia_saeb >= 0 & disciplina == "LP", "1",
+                                ifelse(proficiencia_saeb < 200 & proficiencia_saeb >= 150 & disciplina == "LP", "2",
+                                       ifelse(proficiencia_saeb < 250 & proficiencia_saeb >= 200 & disciplina == "LP", "3",
+                                              ifelse(proficiencia_saeb >= 250 & disciplina == "LP", "4",
+                                                     ifelse(proficiencia_saeb < 0 & disciplina == "MT", "1",
+                                                            ifelse(proficiencia_saeb < 175 & proficiencia_saeb >= 0 & disciplina == "MT", "1",
+                                                                   ifelse(proficiencia_saeb < 225 & proficiencia_saeb >= 175 & disciplina == "MT", "2",
+                                                                          ifelse(proficiencia_saeb < 275 & proficiencia_saeb >= 225 & disciplina == "MT", "3",
+                                                                                 ifelse(proficiencia_saeb >= 275 & disciplina == "MT", "4", NA)))))))))))
+
+Esca_9ef <- Saeb_9EF %>%
+  mutate(escala = ifelse(proficiencia_saeb < 0 & disciplina == "LP", "1",
+                         ifelse(proficiencia_saeb < 200 & proficiencia_saeb >= 0 & disciplina == "LP", "1",
+                                ifelse(proficiencia_saeb < 275 & proficiencia_saeb >= 200 & disciplina == "LP", "2",
+                                       ifelse(proficiencia_saeb < 325 & proficiencia_saeb >= 275 & disciplina == "LP", "3",
+                                              ifelse(proficiencia_saeb >= 325 & disciplina == "LP", "4",
+                                                     ifelse(proficiencia_saeb < 0 & disciplina == "MT", "1",
+                                                            ifelse(proficiencia_saeb < 225 & proficiencia_saeb >= 0 & disciplina == "MT", "1",
+                                                                   ifelse(proficiencia_saeb < 300 & proficiencia_saeb >= 225 & disciplina == "MT", "2",
+                                                                          ifelse(proficiencia_saeb < 350 & proficiencia_saeb >= 300 & disciplina == "MT", "3",
+                                                                                 ifelse(proficiencia_saeb >= 350 & disciplina == "MT", "4", NA)))))))))))
+
+#nomear factor
+Esca_5ef$escala <- factor(Esca_5ef$escala) 
+Esca_5ef$raca <- factor(Esca_5ef$raca)
+Esca_9ef$escala <- factor(Esca_9ef$escala)
+Esca_9ef$raca <- factor(Esca_9ef$raca)
+
+#aqui deve estar o pulo do gato
+#separando por matéria 
+
+lp5 <- subset(Esca_5ef, disciplina == "LP" & nivel_inse %in% c(6:8)) # c(1:3) baixo inse # c(6:8) Alto Inse
+mt5 <- subset(Esca_5ef, disciplina == "MT" & nivel_inse %in% c(6:8)) # c(1:3) baixo inse #  c(6:8) Alto Inse
+lp9 <- subset(Esca_9ef, disciplina == "LP" & nivel_inse %in% c(6:8)) # c(1:3) baixo inse # c(6:8) Alto Inse
+mt9 <- subset(Esca_9ef, disciplina == "MT" & nivel_inse %in% c(6:8)) # c(1:3) baixo inse # c(6:8) Alto Inse
+
+
+# Criar o design da pesquisa para considerando os pesos 
+design_lp5 <- svydesign(id = ~1, weights = ~peso_aluno, data = lp5)
+design_mt5 <- svydesign(id = ~1, weights = ~peso_aluno, data = mt5)
+design_lp9 <- svydesign(id = ~1, weights = ~peso_aluno, data = lp9)
+design_mt9 <- svydesign(id = ~1, weights = ~peso_aluno, data = mt9)
+
+# Função para calcular média ponderada por grupo
+#calcular_media_ponderada <- function(data, design, grupo_var, status_var) {
+# Calcular médias ponderadas por grupo
+# resultado <- svyby(~get(status_var), ~get(grupo_var), design, svymean)
+#  return(resultado)
+#}
+
+# Função para calcular média ponderada por grupo
+calcular_media_ponderada <- function(design, grupo_var, status_var) {
+  resultado <- svyby(~get(status_var), ~get(grupo_var), design, svymean)
+  return(resultado)
+}
+
+# Calcular média ponderada do status por raça e serie 
+#"Insuficiente" = 1, "Basico" = 2, "Proficiente" = 3, "Avancado" = 4
+## 5 ano 
+media_lp5 <- calcular_media_ponderada(design_lp5, "raca", "escala")
+#print(media_lp5)
+
+media_mt5 <- calcular_media_ponderada(design_mt5, "raca", "escala")
+#print(media_mt5)
+
+## 9 ano
+media_lp9 <- calcular_media_ponderada(design_lp9, "raca", "escala")
+#print(media_lp9)
+
+media_mt9 <- calcular_media_ponderada(design_mt9, "raca", "escala")
+#print(media_mt9)
+
+
+# TABELAS DE DISTRIBUIÇÃO DOS NÍVEIS DE APRENDIZAGEM
+# POR RAÇA/COR
+# ============================================================
+
+
+# ============================================================
+# 1. FUNÇÃO PARA CALCULAR A DISTRIBUIÇÃO PONDERADA
+# ============================================================
+
+calcular_distribuicao_escala <- function(design, disciplina_nome) {
+  
+  resultado <- svyby(
+    formula = ~escala,
+    by = ~raca,
+    design = design,
+    FUN = svymean,
+    na.rm = TRUE,
+    keep.names = FALSE
+  )
+  
+  
+  resultado %>%
+    
+    # Manter somente raça e proporções das escalas
+    select(
+      raca,
+      escala1,
+      escala2,
+      escala3,
+      escala4
+    ) %>%
+    
+    # Converter proporções para percentuais
+    mutate(
+      across(
+        .cols = starts_with("escala"),
+        .fns = ~ round(.x * 100, digits = 1)
+      ),
+      
+      Disciplina = disciplina_nome,
+      
+      raca = factor(
+        raca,
+        levels = c(
+          "Branco",
+          "Pardo",
+          "Preto",
+          "Amarela",
+          "Indígena",
+          "ND"
+        )
+      )
+    ) %>%
+    
+    # Renomear as colunas
+    rename(
+      Raca = raca,
+      `1 - Insuficiente` = escala1,
+      `2 - Básico` = escala2,
+      `3 - Proficiente` = escala3,
+      `4 - Avançado` = escala4
+    ) %>%
+    
+    select(
+      Disciplina,
+      Raca,
+      `1 - Insuficiente`,
+      `2 - Básico`,
+      `3 - Proficiente`,
+      `4 - Avançado`
+    ) %>%
+    
+    arrange(
+      Disciplina,
+      Raca
+    )
+}
+
+
+# ============================================================
+# 2. RESULTADOS DO 5º ANO
+# ============================================================
+
+tabela_lp5 <- calcular_distribuicao_escala(
+  design = design_lp5,
+  disciplina_nome = "Língua Portuguesa"
+)
+
+
+tabela_mt5 <- calcular_distribuicao_escala(
+  design = design_mt5,
+  disciplina_nome = "Matemática"
+)
+
+
+# Juntar Língua Portuguesa e Matemática
+tabela_5ano_excel <- bind_rows(
+  tabela_lp5,
+  tabela_mt5
+) %>%
+  
+  mutate(
+    Disciplina = factor(
+      Disciplina,
+      levels = c(
+        "Língua Portuguesa",
+        "Matemática"
+      )
+    )
+  ) %>%
+  
+  arrange(
+    Disciplina,
+    Raca
+  )
+
+
+# ============================================================
+# 3. RESULTADOS DO 9º ANO
+# ============================================================
+
+tabela_lp9 <- calcular_distribuicao_escala(
+  design = design_lp9,
+  disciplina_nome = "Língua Portuguesa"
+)
+
+
+tabela_mt9 <- calcular_distribuicao_escala(
+  design = design_mt9,
+  disciplina_nome = "Matemática"
+)
+
+
+# Juntar Língua Portuguesa e Matemática
+tabela_9ano_excel <- bind_rows(
+  tabela_lp9,
+  tabela_mt9
+) %>%
+  
+  mutate(
+    Disciplina = factor(
+      Disciplina,
+      levels = c(
+        "Língua Portuguesa",
+        "Matemática"
+      )
+    )
+  ) %>%
+  
+  arrange(
+    Disciplina,
+    Raca
+  )
+
+
+
+write_xlsx(
+  list(
+    "Distribuicao_5_ano" = tabela_5ano_excel,
+    "Distribuicao_9_ano" = tabela_9ano_excel
+  ),
+  
+  path = paste0(
+    "Distribuicao_Niveis_Aprendizagem_",
+    "SAEB_2023_ALTO_INSE_ES.xlsx"
+  )
+)
+
+
+
+
+
+
