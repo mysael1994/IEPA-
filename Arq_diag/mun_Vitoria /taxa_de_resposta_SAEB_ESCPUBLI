@@ -1,24 +1,25 @@
 # ============================================================
 # SAEB — TRAJETÓRIA DA COMPOSIÇÃO RACIAL DOS ESTUDANTES
 # BRASIL E ESPÍRITO SANTO
+# REDE MUNICIPAL
 # 5º E 9º ANOS DO ENSINO FUNDAMENTAL
 # ============================================================
 
 
 # ============================================================
-# 0. PACOTES
+# 0. PACOTES E CONFIGURAÇÕES
 # ============================================================
 
 library(basedosdados)
 library(dplyr)
 library(tidyr)
 library(writexl)
-library(ggplot2)
-library(scales)
-
 
 # Projeto de cobrança do Google Cloud
 set_billing_id("mahin-381317")
+
+# Pasta onde o arquivo será salvo
+setwd("C:\\Users\\Mysael Justino\\Documents")
 
 
 # ============================================================
@@ -48,9 +49,9 @@ calcular_trajetoria_racial <- function(tabela, etapa) {
 
       FROM `", tabela, "`
 
-      WHERE disciplina = 'LP'
-        AND peso_aluno IS NOT NULL
-        AND peso_aluno > 0
+      WHERE rede = '1'
+  AND peso_aluno IS NOT NULL
+  AND peso_aluno > 0
     ),
 
 
@@ -140,7 +141,6 @@ calcular_trajetoria_racial <- function(tabela, etapa) {
     FROM distribuicao_racial AS d
 
     LEFT JOIN totais AS t
-
       ON d.ano = t.ano
       AND d.agregado = t.agregado
 
@@ -152,7 +152,7 @@ calcular_trajetoria_racial <- function(tabela, etapa) {
   )
   
   
-  # Executar a consulta
+  # Executar a consulta no BigQuery
   resultado <- basedosdados::read_sql(consulta)
   
   
@@ -225,11 +225,8 @@ resultado_raca_5ano <- calcular_trajetoria_racial(
 )
 
 
+# Tabela do 5º ano em formato largo
 tabela_5ano_excel <- resultado_raca_5ano %>%
-  filter(
-    Etapa == "5º ano"
-  ) %>%
-  
   select(
     Agregado,
     Raca,
@@ -257,11 +254,9 @@ resultado_raca_9ano <- calcular_trajetoria_racial(
   etapa = "9º ano"
 )
 
+
+# Tabela do 9º ano em formato largo
 tabela_9ano_excel <- resultado_raca_9ano %>%
-  filter(
-    Etapa == "9º ano"
-  ) %>%
-  
   select(
     Agregado,
     Raca,
@@ -279,13 +274,25 @@ tabela_9ano_excel <- resultado_raca_9ano %>%
     Raca
   )
 
-#expostando para o excel
+
+# ============================================================
+# 4. CONFERIR AS TABELAS
+# ============================================================
+
+
+# ============================================================
+# 5. EXPORTAR PARA O EXCEL
+# ============================================================
+
 write_xlsx(
   list(
-    "5_ano" = tabela_5ano_excel,
-    "9_ano" = tabela_9ano_excel
+    "5_ano_municipal" = tabela_5ano_excel,
+    "9_ano_municipal" = tabela_9ano_excel
   ),
-  path = "Trajetoria_Racial_SAEB_BR_ES.xlsx"
+  
+  path = "Trajetoria_Racial_SAEB_BR_ES_Rede_Municipal.xlsx"
 )
+
+
+# Conferir a pasta onde o arquivo foi salvo
 getwd()
-setwd("C:\\Users\\Mysael Justino\\Documents")
