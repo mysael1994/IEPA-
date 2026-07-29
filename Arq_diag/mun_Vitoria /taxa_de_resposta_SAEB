@@ -1,0 +1,291 @@
+# ============================================================
+# SAEB — TRAJETÓRIA DA COMPOSIÇÃO RACIAL DOS ESTUDANTES
+# BRASIL E ESPÍRITO SANTO
+# 5º E 9º ANOS DO ENSINO FUNDAMENTAL
+# ============================================================
+
+
+# ============================================================
+# 0. PACOTES
+# ============================================================
+
+library(basedosdados)
+library(dplyr)
+library(tidyr)
+library(writexl)
+library(ggplot2)
+library(scales)
+
+
+# Projeto de cobrança do Google Cloud
+set_billing_id("mahin-381317")
+
+
+# ============================================================
+# 1. FUNÇÃO PARA CALCULAR A DISTRIBUIÇÃO RACIAL
+# ============================================================
+
+calcular_trajetoria_racial <- function(tabela, etapa) {
+  
+  consulta <- paste0(
+    "
+    WITH base AS (
+
+      SELECT
+        ano,
+        sigla_uf,
+
+        CASE
+          WHEN raca_cor = 'A' THEN 'Branco'
+          WHEN raca_cor = 'B' THEN 'Preto'
+          WHEN raca_cor = 'C' THEN 'Pardo'
+          WHEN raca_cor = 'D' THEN 'Amarela'
+          WHEN raca_cor = 'E' THEN 'Indígena'
+          ELSE 'ND'
+        END AS raca,
+
+        peso_aluno
+
+      FROM `", tabela, "`
+
+      WHERE disciplina = 'LP'
+        AND peso_aluno IS NOT NULL
+        AND peso_aluno > 0
+    ),
+
+
+    territorios AS (
+
+      -- ======================================================
+      -- BRASIL
+      -- ======================================================
+
+      SELECT
+        ano,
+        'Brasil' AS agregado,
+        raca,
+        peso_aluno
+
+      FROM base
+
+
+      UNION ALL
+
+
+      -- ======================================================
+      -- ESPÍRITO SANTO
+      -- ======================================================
+
+      SELECT
+        ano,
+        'Espírito Santo' AS agregado,
+        raca,
+        peso_aluno
+
+      FROM base
+
+      WHERE sigla_uf = 'ES'
+    ),
+
+
+    distribuicao_racial AS (
+
+      SELECT
+        ano,
+        agregado,
+        raca,
+
+        COUNT(*) AS numero_observacoes,
+
+        SUM(peso_aluno) AS peso_raca
+
+      FROM territorios
+
+      GROUP BY
+        ano,
+        agregado,
+        raca
+    ),
+
+
+    totais AS (
+
+      SELECT
+        ano,
+        agregado,
+
+        SUM(peso_raca) AS peso_total
+
+      FROM distribuicao_racial
+
+      GROUP BY
+        ano,
+        agregado
+    )
+
+
+    SELECT
+      d.ano,
+      d.agregado,
+      d.raca,
+      d.numero_observacoes,
+      d.peso_raca,
+      t.peso_total,
+
+      SAFE_DIVIDE(
+        d.peso_raca,
+        t.peso_total
+      ) * 100 AS percentual_estudantes
+
+    FROM distribuicao_racial AS d
+
+    LEFT JOIN totais AS t
+
+      ON d.ano = t.ano
+      AND d.agregado = t.agregado
+
+    ORDER BY
+      d.ano,
+      d.agregado,
+      d.raca
+    "
+  )
+  
+  
+  # Executar a consulta
+  resultado <- basedosdados::read_sql(consulta)
+  
+  
+  # Organizar o resultado no R
+  resultado %>%
+    mutate(
+      
+      Ano = as.integer(ano),
+      
+      Etapa = etapa,
+      
+      Agregado = agregado,
+      
+      Raca = factor(
+        raca,
+        levels = c(
+          "Branco",
+          "Pardo",
+          "Preto",
+          "Amarela",
+          "Indígena",
+          "ND"
+        )
+      ),
+      
+      Percentual_Estudantes = round(
+        percentual_estudantes,
+        digits = 1
+      ),
+      
+      Peso_Raca = peso_raca,
+      
+      Peso_Total = peso_total,
+      
+      Numero_Observacoes = numero_observacoes
+    ) %>%
+    
+    select(
+      Ano,
+      Etapa,
+      Agregado,
+      Raca,
+      Percentual_Estudantes,
+      Peso_Raca,
+      Peso_Total,
+      Numero_Observacoes
+    ) %>%
+    
+    arrange(
+      Ano,
+      factor(
+        Agregado,
+        levels = c(
+          "Brasil",
+          "Espírito Santo"
+        )
+      ),
+      Raca
+    )
+}
+
+
+# ============================================================
+# 2. TRAJETÓRIA RACIAL — 5º ANO
+# ============================================================
+
+resultado_raca_5ano <- calcular_trajetoria_racial(
+  tabela = "basedosdados.br_inep_saeb.aluno_ef_5ano",
+  etapa = "5º ano"
+)
+
+
+tabela_5ano_excel <- resultado_raca_5ano %>%
+  filter(
+    Etapa == "5º ano"
+  ) %>%
+  
+  select(
+    Agregado,
+    Raca,
+    Ano,
+    Percentual_Estudantes
+  ) %>%
+  
+  pivot_wider(
+    names_from = Ano,
+    values_from = Percentual_Estudantes
+  ) %>%
+  
+  arrange(
+    Agregado,
+    Raca
+  )
+
+
+# ============================================================
+# 3. TRAJETÓRIA RACIAL — 9º ANO
+# ============================================================
+
+resultado_raca_9ano <- calcular_trajetoria_racial(
+  tabela = "basedosdados.br_inep_saeb.aluno_ef_9ano",
+  etapa = "9º ano"
+)
+
+tabela_9ano_excel <- resultado_raca_9ano %>%
+  filter(
+    Etapa == "9º ano"
+  ) %>%
+  
+  select(
+    Agregado,
+    Raca,
+    Ano,
+    Percentual_Estudantes
+  ) %>%
+  
+  pivot_wider(
+    names_from = Ano,
+    values_from = Percentual_Estudantes
+  ) %>%
+  
+  arrange(
+    Agregado,
+    Raca
+  )
+
+#expostando para o excel
+write_xlsx(
+  list(
+    "5_ano" = tabela_5ano_excel,
+    "9_ano" = tabela_9ano_excel
+  ),
+  path = "Trajetoria_Racial_SAEB_BR_ES.xlsx"
+)
+getwd()
+setwd("C:\\Users\\Mysael Justino\\Documents")
