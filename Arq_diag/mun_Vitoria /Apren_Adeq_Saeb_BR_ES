@@ -19,7 +19,7 @@ library(tidyr)
 
 # Usando base dos dados #
 
-set_billing_id("mahin-dados")
+set_billing_id("mahin-381317")
 
 # Dicionario #
 query <- bdplyr("br_inep_saeb.dicionario")
@@ -40,13 +40,14 @@ Saeb_9EF <- basedosdados::read_sql('SELECT sigla_uf,id_regiao,id_municipio,id_al
 #Saeb_5EF <- Saeb_5EF %>% mutate(ES=ifelse(sigla_uf %in% "ES",1,0))
 Saeb_5EF <- Saeb_5EF %>% drop_na(proficiencia_saeb)
 Saeb_5EF <- Saeb_5EF %>% drop_na(peso_aluno)
-#Saeb_5EF <- subset(Saeb_5EF, rede %in% "3")
+Saeb_5EF <- subset(Saeb_5EF, rede == 1)
+
 
 # 9 EF
 #Saeb_9EF <- Saeb_9EF %>% mutate(ES=ifelse(sigla_uf %in% "ES",1,0))
 Saeb_9EF <- Saeb_9EF %>% drop_na(proficiencia_saeb)
 Saeb_9EF <- Saeb_9EF %>% drop_na(peso_aluno)
-#Saeb_9EF <- subset(Saeb_9EF, rede %in% "3")
+Saeb_9EF <- subset(Saeb_9EF, rede == 1)
 
 # Codificando cor/raca 5EF
 #Saeb_5EF <- Saeb_5EF %>% mutate(raca = ifelse (raca_cor == "A","branco",
@@ -78,6 +79,7 @@ Saeb_9EF <- Saeb_9EF %>% mutate(raca = ifelse(raca_cor == "A", "Branco",
                                                                    ifelse(raca_cor == "E", "Indígena", "ND")))))
 )
 
+
 # Codificando aprendizagem adequada (classificação Qedu) - https://conteudos.qedu.org.br/academia/aprendizado-adequado/
 
 Saeb_5EF <- Saeb_5EF %>% mutate(LP_adequado = ifelse(proficiencia_saeb >= 200 & disciplina =="LP" ,1,0))
@@ -93,6 +95,7 @@ Saeb_Adequado_MAT_5EF_BR <- subset(Saeb_5EF, disciplina == "MT") %>% group_by(ra
 Saeb_Adequado_LP_9EF_BR <- subset(Saeb_9EF, disciplina == "LP") %>% group_by(raca) %>% summarise(LP_adequado = weighted.mean(LP_adequado,peso_aluno))
 Saeb_Adequado_MAT_9EF_BR <- subset(Saeb_9EF, disciplina == "MT") %>% group_by(raca) %>% summarise(MAT_adequado = weighted.mean(MAT_adequado,peso_aluno))
 
+
 ## ES ##
 Saeb_Adequado_LP_5EF_ES <- subset(Saeb_5EF, disciplina == "LP" & sigla_uf == "ES") %>% group_by(raca) %>% summarise(LP_adequado = weighted.mean(LP_adequado,peso_aluno))
 Saeb_Adequado_MAT_5EF_ES <- subset(Saeb_5EF, disciplina == "MT" & sigla_uf == "ES") %>% group_by(raca) %>% summarise(MAT_adequado = weighted.mean(MAT_adequado,peso_aluno))
@@ -104,6 +107,244 @@ Saeb_Adequado_MAT_9EF_ES <- subset(Saeb_9EF, disciplina == "MT" & sigla_uf == "E
 #Saeb_Adequado_MAT_5EF_Sobral <- subset(Saeb_5EF, disciplina == "MT" & sobral == 1) %>% group_by(raca) %>% summarise(MAT_adequado = weighted.mean(MAT_adequado,peso_aluno))
 #Saeb_Adequado_LP_9EF_Sobral <- subset(Saeb_9EF, disciplina == "LP" & sobral == 1) %>% group_by(raca) %>% summarise(LP_adequado = weighted.mean(LP_adequado,peso_aluno))
 #Saeb_Adequado_MAT_9EF_Sobral <- subset(Saeb_9EF, disciplina == "MT" & sobral == 1) %>% group_by(raca) %>% summarise(MAT_adequado = weighted.mean(MAT_adequado,peso_aluno))
+
+
+# ============================================================
+# ORGANIZAR TABELAS PARA EXPORTAÇÃO
+# ============================================================
+
+
+# ============================================================
+# 1. TABELA DO 5º ANO
+# ============================================================
+
+# Língua Portuguesa — Brasil
+tabela_LP_5EF_BR <- Saeb_Adequado_LP_5EF_BR %>%
+  transmute(
+    Agregado = "Brasil",
+    Disciplina = "Língua Portuguesa",
+    Raca = raca,
+    Aprendizagem_Adequada = LP_adequado * 100
+  )
+
+
+# Matemática — Brasil
+tabela_MAT_5EF_BR <- Saeb_Adequado_MAT_5EF_BR %>%
+  transmute(
+    Agregado = "Brasil",
+    Disciplina = "Matemática",
+    Raca = raca,
+    Aprendizagem_Adequada = MAT_adequado * 100
+  )
+
+
+# Língua Portuguesa — Espírito Santo
+tabela_LP_5EF_ES <- Saeb_Adequado_LP_5EF_ES %>%
+  transmute(
+    Agregado = "Espírito Santo",
+    Disciplina = "Língua Portuguesa",
+    Raca = raca,
+    Aprendizagem_Adequada = LP_adequado * 100
+  )
+
+
+# Matemática — Espírito Santo
+tabela_MAT_5EF_ES <- Saeb_Adequado_MAT_5EF_ES %>%
+  transmute(
+    Agregado = "Espírito Santo",
+    Disciplina = "Matemática",
+    Raca = raca,
+    Aprendizagem_Adequada = MAT_adequado * 100
+  )
+
+
+# Juntar resultados do 5º ano
+tabela_5ano_excel <- bind_rows(
+  tabela_LP_5EF_BR,
+  tabela_MAT_5EF_BR,
+  tabela_LP_5EF_ES,
+  tabela_MAT_5EF_ES
+) %>%
+  
+  mutate(
+    Ano = 2023,
+    
+    Aprendizagem_Adequada = round(
+      Aprendizagem_Adequada,
+      digits = 1
+    ),
+    
+    Raca = factor(
+      Raca,
+      levels = c(
+        "Branco",
+        "Pardo",
+        "Preto",
+        "Amarela",
+        "Indígena",
+        "ND"
+      )
+    ),
+    
+    Agregado = factor(
+      Agregado,
+      levels = c(
+        "Brasil",
+        "Espírito Santo"
+      )
+    ),
+    
+    Disciplina = factor(
+      Disciplina,
+      levels = c(
+        "Língua Portuguesa",
+        "Matemática"
+      )
+    )
+  ) %>%
+  
+  select(
+    Ano,
+    Agregado,
+    Disciplina,
+    Raca,
+    Aprendizagem_Adequada
+  ) %>%
+  
+  pivot_wider(
+    names_from = Raca,
+    values_from = Aprendizagem_Adequada
+  ) %>%
+  
+  arrange(
+    Agregado,
+    Disciplina
+  )
+
+
+# ============================================================
+# 2. TABELA DO 9º ANO
+# ============================================================
+
+# Língua Portuguesa — Brasil
+tabela_LP_9EF_BR <- Saeb_Adequado_LP_9EF_BR %>%
+  transmute(
+    Agregado = "Brasil",
+    Disciplina = "Língua Portuguesa",
+    Raca = raca,
+    Aprendizagem_Adequada = LP_adequado * 100
+  )
+
+
+# Matemática — Brasil
+tabela_MAT_9EF_BR <- Saeb_Adequado_MAT_9EF_BR %>%
+  transmute(
+    Agregado = "Brasil",
+    Disciplina = "Matemática",
+    Raca = raca,
+    Aprendizagem_Adequada = MAT_adequado * 100
+  )
+
+
+# Língua Portuguesa — Espírito Santo
+tabela_LP_9EF_ES <- Saeb_Adequado_LP_9EF_ES %>%
+  transmute(
+    Agregado = "Espírito Santo",
+    Disciplina = "Língua Portuguesa",
+    Raca = raca,
+    Aprendizagem_Adequada = LP_adequado * 100
+  )
+
+
+# Matemática — Espírito Santo
+tabela_MAT_9EF_ES <- Saeb_Adequado_MAT_9EF_ES %>%
+  transmute(
+    Agregado = "Espírito Santo",
+    Disciplina = "Matemática",
+    Raca = raca,
+    Aprendizagem_Adequada = MAT_adequado * 100
+  )
+
+
+# Juntar resultados do 9º ano
+tabela_9ano_excel <- bind_rows(
+  tabela_LP_9EF_BR,
+  tabela_MAT_9EF_BR,
+  tabela_LP_9EF_ES,
+  tabela_MAT_9EF_ES
+) %>%
+  
+  mutate(
+    Ano = 2023,
+    
+    Aprendizagem_Adequada = round(
+      Aprendizagem_Adequada,
+      digits = 1
+    ),
+    
+    Raca = factor(
+      Raca,
+      levels = c(
+        "Branco",
+        "Pardo",
+        "Preto",
+        "Amarela",
+        "Indígena",
+        "ND"
+      )
+    ),
+    
+    Agregado = factor(
+      Agregado,
+      levels = c(
+        "Brasil",
+        "Espírito Santo"
+      )
+    ),
+    
+    Disciplina = factor(
+      Disciplina,
+      levels = c(
+        "Língua Portuguesa",
+        "Matemática"
+      )
+    )
+  ) %>%
+  
+  select(
+    Ano,
+    Agregado,
+    Disciplina,
+    Raca,
+    Aprendizagem_Adequada
+  ) %>%
+  
+  pivot_wider(
+    names_from = Raca,
+    values_from = Aprendizagem_Adequada
+  ) %>%
+  
+  arrange(
+    Agregado,
+    Disciplina
+  )
+
+
+getwd()
+#exportando
+write_xlsx(
+  list(
+    "Aprendizagem_5_ano" = tabela_5ano_excel,
+    "Aprendizagem_9_ano" = tabela_9ano_excel
+  ),
+  
+  path = paste0(
+    "Aprendizagem_Adequada_SAEB_2023_",
+    "Brasil_Espirito_Santo.xlsx"
+  )
+)
+
+
 
 ### Gráficos ###
 
