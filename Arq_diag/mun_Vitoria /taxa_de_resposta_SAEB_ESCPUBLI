@@ -1,7 +1,7 @@
 # ============================================================
 # SAEB — TRAJETÓRIA DA COMPOSIÇÃO RACIAL DOS ESTUDANTES
 # BRASIL E ESPÍRITO SANTO
-# REDE MUNICIPAL
+# ESCOLAS PÚBLICAS
 # 5º E 9º ANOS DO ENSINO FUNDAMENTAL
 # ============================================================
 
@@ -14,11 +14,13 @@ library(basedosdados)
 library(dplyr)
 library(tidyr)
 library(writexl)
+library(ggplot2)
+library(scales)
 
 # Projeto de cobrança do Google Cloud
 set_billing_id("mahin-381317")
 
-# Pasta onde o arquivo será salvo
+# Pasta na qual o arquivo será salvo
 setwd("C:\\Users\\Mysael Justino\\Documents")
 
 
@@ -30,7 +32,62 @@ calcular_trajetoria_racial <- function(tabela, etapa) {
   
   consulta <- paste0(
     "
-    WITH base AS (
+    WITH base_original AS (
+
+      SELECT
+        ano,
+        sigla_uf,
+        raca_cor,
+        peso_aluno,
+        rede,
+        escola_publica,
+
+        -- ====================================================
+        -- PADRONIZAÇÃO DA REDE PÚBLICA AO LONGO DOS ANOS
+        -- ====================================================
+
+        CASE
+
+          -- Até 2019:
+          -- 1 = federal
+          -- 2 = estadual
+          -- 3 = municipal
+          -- 4 = privada
+
+          WHEN ano <= 2019
+               AND CAST(rede AS STRING) IN ('1', '2', '3')
+            THEN 1
+
+
+          -- Em 2021:
+          -- escola_publica = 1 identifica escola pública
+
+          WHEN ano = 2021
+               AND CAST(escola_publica AS STRING) = '1'
+            THEN 1
+
+
+          -- A partir de 2023:
+          -- rede = 1 identifica rede pública
+
+          WHEN ano >= 2023
+               AND CAST(rede AS STRING) = '1'
+            THEN 1
+
+
+          ELSE 0
+
+        END AS escola_publica_padronizada
+
+      FROM `", tabela, "`
+
+      WHERE ano >= 2005
+        AND peso_aluno IS NOT NULL
+        AND peso_aluno > 0
+    ),
+
+
+    base AS (
 
       SELECT
         ano,
@@ -47,11 +104,10 @@ calcular_trajetoria_racial <- function(tabela, etapa) {
 
         peso_aluno
 
-      FROM `", tabela, "`
+      FROM base_original
 
-      WHERE rede = '1'
-  AND peso_aluno IS NOT NULL
-  AND peso_aluno > 0
+      -- Manter somente estudantes de escolas públicas
+      WHERE escola_publica_padronizada = 1
     ),
 
 
@@ -152,7 +208,7 @@ calcular_trajetoria_racial <- function(tabela, etapa) {
   )
   
   
-  # Executar a consulta no BigQuery
+  # Executar a consulta
   resultado <- basedosdados::read_sql(consulta)
   
   
@@ -225,7 +281,6 @@ resultado_raca_5ano <- calcular_trajetoria_racial(
 )
 
 
-# Tabela do 5º ano em formato largo
 tabela_5ano_excel <- resultado_raca_5ano %>%
   select(
     Agregado,
@@ -240,7 +295,13 @@ tabela_5ano_excel <- resultado_raca_5ano %>%
   ) %>%
   
   arrange(
-    Agregado,
+    factor(
+      Agregado,
+      levels = c(
+        "Brasil",
+        "Espírito Santo"
+      )
+    ),
     Raca
   )
 
@@ -255,7 +316,6 @@ resultado_raca_9ano <- calcular_trajetoria_racial(
 )
 
 
-# Tabela do 9º ano em formato largo
 tabela_9ano_excel <- resultado_raca_9ano %>%
   select(
     Agregado,
@@ -270,7 +330,13 @@ tabela_9ano_excel <- resultado_raca_9ano %>%
   ) %>%
   
   arrange(
-    Agregado,
+    factor(
+      Agregado,
+      levels = c(
+        "Brasil",
+        "Espírito Santo"
+      )
+    ),
     Raca
   )
 
@@ -279,6 +345,10 @@ tabela_9ano_excel <- resultado_raca_9ano %>%
 # 4. CONFERIR AS TABELAS
 # ============================================================
 
+View(tabela_5ano_excel)
+
+View(tabela_9ano_excel)
+
 
 # ============================================================
 # 5. EXPORTAR PARA O EXCEL
@@ -286,11 +356,10 @@ tabela_9ano_excel <- resultado_raca_9ano %>%
 
 write_xlsx(
   list(
-    "5_ano_municipal" = tabela_5ano_excel,
-    "9_ano_municipal" = tabela_9ano_excel
+    "5_ano_escolas_publicas" = tabela_5ano_excel,
+    "9_ano_escolas_publicas" = tabela_9ano_excel
   ),
-  
-  path = "Trajetoria_Racial_SAEB_BR_ES_Rede_Municipal.xlsx"
+  path = "Trajetoria_Racial_SAEB_BR_ES_Escolas_Publicas.xlsx"
 )
 
 
