@@ -1,0 +1,173 @@
+# Pacotes ----------------------------------------------------------------
+
+library(basedosdados)
+library(dplyr)
+library(ggplot2)
+
+# Projeto Google Cloud ----------------------------------------------------
+
+basedosdados::set_billing_id("mahin-381317")
+
+# Identificadores ---------------------------------------------------------
+
+id_escola_vitoria   <- "32040610"
+id_municipio_vitoria <- "3205309"
+
+# Dados da escola ---------------------------------------------------------
+
+ideb_escola <- basedosdados::read_sql("
+  SELECT
+    ano,
+    id_municipio,
+    id_escola,
+    rede,
+    ensino,
+    anos_escolares,
+    ideb
+  FROM `basedosdados.br_inep_ideb.escola`
+  WHERE id_escola = '32040610'
+    AND id_municipio = '3205309'
+    AND rede = 'municipal'
+    AND ideb IS NOT NULL
+  ORDER BY ano, anos_escolares
+")
+
+# Dados oficiais do município --------------------------------------------
+
+ideb_municipio <- basedosdados::read_sql("
+  SELECT
+    ano,
+    id_municipio,
+    rede,
+    ensino,
+    anos_escolares,
+    ideb
+  FROM `basedosdados.br_inep_ideb.municipio`
+  WHERE id_municipio = '3205309'
+    AND rede = 'municipal'
+    AND ideb IS NOT NULL
+  ORDER BY ano, anos_escolares
+")
+
+# Conferir quais etapas existem para a escola -----------------------------
+
+ideb_escola %>%
+  distinct(ensino, anos_escolares) %>%
+  arrange(ensino, anos_escolares)
+
+
+trajetoria_escola <- ideb_escola %>%
+  filter(
+    ensino == "fundamental",
+    anos_escolares == "iniciais (1-5)"
+  ) %>%
+  transmute(
+    ano,
+    grupo = "EMEF TI Paulo Roberto Vieira Gomes",
+    ideb
+  )
+
+trajetoria_municipio <- ideb_municipio %>%
+  filter(
+    ensino == "fundamental",
+    anos_escolares == "iniciais (1-5)"
+  ) %>%
+  transmute(
+    ano,
+    grupo = "Rede municipal de Vitória",
+    ideb
+  )
+
+trajetoria <- bind_rows(
+  trajetoria_escola,
+  trajetoria_municipio
+) %>%
+  arrange(ano, grupo)
+
+
+library(ggplot2)
+
+ggplot(
+  trajetoria,
+  aes(
+    x = ano,
+    y = ideb,
+    color = grupo,
+    group = grupo
+  )
+) +
+  
+  geom_line(linewidth = 1.3) +
+  
+  geom_point(size = 3.5) +
+  
+  geom_text(
+    aes(label = ideb),
+    vjust = -0.8,
+    size = 4,
+    show.legend = FALSE
+  ) +
+  
+  scale_color_manual(values = c(
+    "EMEF TI Paulo Roberto Vieira Gomes" = "#1F77B4",
+    "Rede municipal de Vitória" = "#D62728"
+  )) +
+  
+  scale_x_continuous(
+    breaks = unique(trajetoria$ano)
+  ) +
+  
+  labs(
+    title = "Trajetória do IDEB",
+    subtitle = "Anos iniciais do Ensino Fundamental",
+    x = "Ano",
+    y = "IDEB",
+    color = "",
+    caption = "Fonte: INEP/Base dos Dados. Elaboração própria."
+  ) +
+  
+  theme_minimal(base_size = 13) +
+  
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold")
+  )
+
+#tabela de apresentação 
+comparacao_anos <- trajetoria_escola %>%
+  rename(ideb_escola = ideb) %>%
+  left_join(
+    trajetoria_municipio %>%
+      rename(ideb_municipio = ideb),
+    by = "ano"
+  ) %>%
+  mutate(
+    diferenca = ideb_escola - ideb_municipio
+  )
+
+comparacao_anos
+
+#expostando para o Excel
+tabela_excel <- comparacao_anos %>%
+  select(
+    ano,
+    ideb_escola,
+    ideb_municipio
+  ) %>%
+  rename(
+    Ano = ano,
+    `EMEF TI Paulo Roberto Vieira Gomes` = ideb_escola,
+    `Rede Municipal de Vitória` = ideb_municipio
+  ) %>%
+  arrange(Ano)
+
+tabela_excel
+
+library(openxlsx)
+write.xlsx(
+  tabela_excel,
+  "trajetoria_IDEB_vitoria.xlsx",
+  overwrite = TRUE
+)
