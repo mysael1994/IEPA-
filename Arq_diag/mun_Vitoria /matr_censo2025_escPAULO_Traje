@@ -1,0 +1,1437 @@
+# ============================================================
+# CENSO ESCOLAR — EVOLUÇÃO DAS MATRÍCULAS POR RAÇA/COR
+#
+# COMPARAÇÃO:
+# 1. EMEF TI Paulo Roberto Vieira Gomes
+# 2. Conjunto das escolas municipais de Vitória
+#
+# PERÍODO: 2007 A 2025
+# ============================================================
+
+
+# ============================================================
+# 0. INSTALAÇÃO E CARREGAMENTO DOS PACOTES
+# ============================================================
+
+instalar_e_carregar <- function(pacotes) {
+  
+  for (pacote in pacotes) {
+    
+    if (!require(pacote, character.only = TRUE)) {
+      
+      install.packages(
+        pacote,
+        dependencies = TRUE
+      )
+      
+      library(
+        pacote,
+        character.only = TRUE
+      )
+    }
+  }
+}
+
+
+pacotes_necessarios <- c(
+  "dplyr",
+  "tidyr",
+  "purrr",
+  "ggplot2",
+  "scales",
+  "writexl"
+)
+
+
+instalar_e_carregar(
+  pacotes_necessarios
+)
+
+
+# ============================================================
+# 1. IDENTIFICADORES
+# ============================================================
+
+# Código do município de Vitória
+id_municipio_vitoria <- "3205309"
+
+# Código da EMEF TI Paulo Roberto Vieira Gomes
+id_escola_paulo <- "32040610"
+
+# Nomes que aparecerão nas tabelas e nos gráficos
+nome_escola <- "EMEF TI Paulo Roberto Vieira Gomes"
+
+nome_rede <- "Escolas municipais de Vitória"
+
+
+# ============================================================
+# 2. PASTA DOS MICRODADOS
+# ============================================================
+
+# Todos os arquivos ZIP devem estar nesta pasta.
+pasta_microdados <- "C:/Users/Mysael Justino/Documents"
+
+
+# ============================================================
+# 3. CAMINHOS DOS ARQUIVOS DE 2007 A 2024
+# EXCETO 2020
+# ============================================================
+
+anos_consolidados <- c(
+  2007:2019,
+  2021:2024
+)
+
+
+arquivos_2007_2024 <- setNames(
+  
+  file.path(
+    
+    pasta_microdados,
+    
+    paste0(
+      "microdados_censo_escolar_",
+      anos_consolidados,
+      ".zip"
+    )
+  ),
+  
+  anos_consolidados
+)
+
+
+# O arquivo de 2025 possui um sublinhado adicional no nome.
+arquivo_2025 <- file.path(
+  pasta_microdados,
+  "microdados_censo_escolar_2025_.zip"
+)
+
+
+# ============================================================
+# 4. CONFERIR SE TODOS OS ARQUIVOS EXISTEM
+# ============================================================
+
+todos_arquivos <- c(
+  arquivos_2007_2024,
+  `2025` = arquivo_2025
+)
+
+
+arquivos_inexistentes <- todos_arquivos[
+  !file.exists(todos_arquivos)
+]
+
+
+if (length(arquivos_inexistentes) > 0) {
+  
+  stop(
+    paste0(
+      "Os seguintes arquivos não foram encontrados:\n\n",
+      paste(
+        arquivos_inexistentes,
+        collapse = "\n"
+      )
+    )
+  )
+}
+
+
+# ============================================================
+# 5. VARIÁVEIS UTILIZADAS
+# ============================================================
+
+colunas_raca <- c(
+  "QT_MAT_BAS_ND",
+  "QT_MAT_BAS_BRANCA",
+  "QT_MAT_BAS_PRETA",
+  "QT_MAT_BAS_PARDA",
+  "QT_MAT_BAS_AMARELA",
+  "QT_MAT_BAS_INDIGENA"
+)
+
+
+colunas_consolidado <- c(
+  "CO_ENTIDADE",
+  "CO_MUNICIPIO",
+  "TP_DEPENDENCIA",
+  colunas_raca
+)
+
+
+colunas_matricula_2025 <- c(
+  "CO_ENTIDADE",
+  colunas_raca
+)
+
+
+# ============================================================
+# 6. LOCALIZAR UM ARQUIVO DENTRO DO ZIP
+# ============================================================
+
+localizar_arquivo_zip <- function(
+    caminho_zip,
+    nome_procurado
+) {
+  
+  arquivos_internos <- unzip(
+    caminho_zip,
+    list = TRUE
+  )$Name
+  
+  
+  arquivo_encontrado <- arquivos_internos[
+    grepl(
+      nome_procurado,
+      arquivos_internos,
+      fixed = TRUE,
+      useBytes = TRUE
+    )
+  ]
+  
+  
+  if (length(arquivo_encontrado) == 0) {
+    
+    stop(
+      paste0(
+        "O arquivo '",
+        nome_procurado,
+        "' não foi encontrado dentro do ZIP:\n",
+        caminho_zip
+      )
+    )
+  }
+  
+  
+  if (length(arquivo_encontrado) > 1) {
+    
+    warning(
+      paste0(
+        "Mais de um arquivo foi encontrado para '",
+        nome_procurado,
+        "'. Será utilizado o primeiro."
+      )
+    )
+  }
+  
+  
+  arquivo_encontrado[1]
+}
+
+
+# ============================================================
+# 7. VALIDAR AS COLUNAS DO BANCO
+# ============================================================
+
+validar_colunas <- function(
+    dados,
+    colunas_necessarias,
+    ano
+) {
+  
+  colunas_ausentes <- setdiff(
+    colunas_necessarias,
+    names(dados)
+  )
+  
+  
+  if (length(colunas_ausentes) > 0) {
+    
+    stop(
+      paste0(
+        "As seguintes colunas estão ausentes no Censo de ",
+        ano,
+        ":\n",
+        paste(
+          colunas_ausentes,
+          collapse = ", "
+        )
+      )
+    )
+  }
+}
+
+
+# ============================================================
+# 8. LEITURA DOS CENSOS DE 2007 A 2024
+#
+# Esses anos possuem um único arquivo consolidado:
+# microdados_ed_basica_XXXX.csv
+# ============================================================
+
+ler_censo_consolidado <- function(
+    caminho_zip,
+    ano
+) {
+  
+  message(
+    paste0(
+      "Lendo o Censo Escolar de ",
+      ano,
+      "..."
+    )
+  )
+  
+  
+  nome_arquivo <- paste0(
+    "microdados_ed_basica_",
+    ano,
+    ".csv"
+  )
+  
+  
+  arquivo_interno <- localizar_arquivo_zip(
+    caminho_zip = caminho_zip,
+    nome_procurado = nome_arquivo
+  )
+  
+  
+  dados <- read.csv(
+    unz(
+      caminho_zip,
+      arquivo_interno
+    ),
+    sep = ";",
+    fileEncoding = "Latin1",
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+  
+  
+  validar_colunas(
+    dados = dados,
+    colunas_necessarias = colunas_consolidado,
+    ano = ano
+  )
+  
+  
+  dados %>%
+    
+    select(
+      all_of(colunas_consolidado)
+    ) %>%
+    
+    mutate(
+      
+      CO_ENTIDADE =
+        as.character(CO_ENTIDADE),
+      
+      CO_MUNICIPIO =
+        as.character(CO_MUNICIPIO),
+      
+      TP_DEPENDENCIA =
+        as.integer(TP_DEPENDENCIA),
+      
+      across(
+        all_of(colunas_raca),
+        ~ as.numeric(.x)
+      ),
+      
+      across(
+        all_of(colunas_raca),
+        ~ coalesce(.x, 0)
+      )
+    ) %>%
+    
+    # Dependência 3 = municipal
+    filter(
+      CO_MUNICIPIO == id_municipio_vitoria,
+      TP_DEPENDENCIA == 3
+    ) %>%
+    
+    mutate(
+      Ano = as.integer(ano)
+    ) %>%
+    
+    select(
+      Ano,
+      CO_ENTIDADE,
+      all_of(colunas_raca)
+    )
+}
+
+
+# ============================================================
+# 9. LEITURA DO CENSO DE 2025
+#
+# Em 2025, escola e matrícula estão em tabelas separadas.
+# ============================================================
+
+ler_censo_2025 <- function(
+    caminho_zip
+) {
+  
+  ano <- 2025
+  
+  
+  message(
+    "Lendo o Censo Escolar de 2025..."
+  )
+  
+  
+  arquivo_escola <- localizar_arquivo_zip(
+    caminho_zip = caminho_zip,
+    nome_procurado = "Tabela_Escola_2025.csv"
+  )
+  
+  
+  arquivo_matricula <- localizar_arquivo_zip(
+    caminho_zip = caminho_zip,
+    nome_procurado = "Tabela_Matricula_2025.csv"
+  )
+  
+  
+  # ----------------------------------------------------------
+  # Identificação das escolas municipais de Vitória
+  # ----------------------------------------------------------
+  
+  escolas <- read.csv(
+    unz(
+      caminho_zip,
+      arquivo_escola
+    ),
+    sep = ";",
+    fileEncoding = "Latin1",
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+  
+  
+  validar_colunas(
+    dados = escolas,
+    colunas_necessarias = c(
+      "CO_ENTIDADE",
+      "CO_MUNICIPIO",
+      "TP_DEPENDENCIA"
+    ),
+    ano = ano
+  )
+  
+  
+  escolas_vitoria <- escolas %>%
+    
+    select(
+      CO_ENTIDADE,
+      CO_MUNICIPIO,
+      TP_DEPENDENCIA
+    ) %>%
+    
+    mutate(
+      
+      CO_ENTIDADE =
+        as.character(CO_ENTIDADE),
+      
+      CO_MUNICIPIO =
+        as.character(CO_MUNICIPIO),
+      
+      TP_DEPENDENCIA =
+        as.integer(TP_DEPENDENCIA)
+    ) %>%
+    
+    filter(
+      CO_MUNICIPIO == id_municipio_vitoria,
+      TP_DEPENDENCIA == 3
+    )
+  
+  
+  # ----------------------------------------------------------
+  # Quantidades de matrícula por raça/cor
+  # ----------------------------------------------------------
+  
+  matriculas <- read.csv(
+    unz(
+      caminho_zip,
+      arquivo_matricula
+    ),
+    sep = ";",
+    fileEncoding = "Latin1",
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+  
+  
+  validar_colunas(
+    dados = matriculas,
+    colunas_necessarias = colunas_matricula_2025,
+    ano = ano
+  )
+  
+  
+  matriculas %>%
+    
+    select(
+      all_of(colunas_matricula_2025)
+    ) %>%
+    
+    mutate(
+      
+      CO_ENTIDADE =
+        as.character(CO_ENTIDADE),
+      
+      across(
+        all_of(colunas_raca),
+        ~ as.numeric(.x)
+      ),
+      
+      across(
+        all_of(colunas_raca),
+        ~ coalesce(.x, 0)
+      )
+    ) %>%
+    
+    inner_join(
+      escolas_vitoria,
+      by = "CO_ENTIDADE"
+    ) %>%
+    
+    mutate(
+      Ano = 2025L
+    ) %>%
+    
+    select(
+      Ano,
+      CO_ENTIDADE,
+      all_of(colunas_raca)
+    )
+}
+
+
+# ============================================================
+# 10. LER AUTOMATICAMENTE OS CENSOS DE 2007 A 2024
+# ============================================================
+
+bases_2007_2024 <- map2_dfr(
+  
+  .x = arquivos_2007_2024,
+  
+  .y = as.integer(
+    names(
+      arquivos_2007_2024
+    )
+  ),
+  
+  .f = ~ ler_censo_consolidado(
+    caminho_zip = .x,
+    ano = .y
+  )
+)
+
+
+# ============================================================
+# 11. LER O CENSO DE 2025
+# ============================================================
+
+base_2025 <- ler_censo_2025(
+  caminho_zip = arquivo_2025
+)
+
+
+# ============================================================
+# 12. JUNTAR TODOS OS ANOS
+# ============================================================
+
+matriculas_vitoria_2007_2025 <- bind_rows(
+  bases_2007_2024,
+  base_2025
+) %>%
+  
+  arrange(
+    Ano,
+    CO_ENTIDADE
+  )
+
+
+# ============================================================
+# 13. CONFERIR O NÚMERO DE ESCOLAS POR ANO
+# ============================================================
+
+numero_escolas_ano <- matriculas_vitoria_2007_2025 %>%
+  
+  group_by(
+    Ano
+  ) %>%
+  
+  summarise(
+    
+    Numero_escolas =
+      n_distinct(CO_ENTIDADE),
+    
+    .groups = "drop"
+  )
+
+
+print(
+  numero_escolas_ano
+)
+
+
+# ============================================================
+# 14. CONFERIR A PRESENÇA DA ESCOLA PAULO ROBERTO
+# ============================================================
+
+presenca_escola_paulo <- matriculas_vitoria_2007_2025 %>%
+  
+  filter(
+    CO_ENTIDADE == id_escola_paulo
+  ) %>%
+  
+  arrange(
+    Ano
+  )
+
+
+print(
+  presenca_escola_paulo
+)
+
+
+anos_esperados <- c(
+  2007:2019,
+  2021:2025
+)
+
+anos_sem_escola <- setdiff(
+  anos_esperados,
+  presenca_escola_paulo$Ano
+)
+
+if (length(anos_sem_escola) > 0) {
+  
+  warning(
+    paste0(
+      "A escola ",
+      id_escola_paulo,
+      " não foi encontrada nos seguintes anos: ",
+      paste(
+        anos_sem_escola,
+        collapse = ", "
+      )
+    )
+  )
+}
+
+
+# ============================================================
+# 15. CALCULAR A COMPOSIÇÃO RACIAL
+# ============================================================
+
+calcular_composicao_racial <- function(
+    dados
+) {
+  
+  # ----------------------------------------------------------
+  # Soma das matrículas de toda a rede municipal
+  # ----------------------------------------------------------
+  
+  rede <- dados %>%
+    
+    group_by(
+      Ano
+    ) %>%
+    
+    summarise(
+      
+      Nao_declarada =
+        sum(QT_MAT_BAS_ND, na.rm = TRUE),
+      
+      Branca =
+        sum(QT_MAT_BAS_BRANCA, na.rm = TRUE),
+      
+      Preta =
+        sum(QT_MAT_BAS_PRETA, na.rm = TRUE),
+      
+      Parda =
+        sum(QT_MAT_BAS_PARDA, na.rm = TRUE),
+      
+      Amarela =
+        sum(QT_MAT_BAS_AMARELA, na.rm = TRUE),
+      
+      Indigena =
+        sum(QT_MAT_BAS_INDIGENA, na.rm = TRUE),
+      
+      .groups = "drop"
+    ) %>%
+    
+    mutate(
+      Agregado = nome_rede
+    )
+  
+  
+  # ----------------------------------------------------------
+  # Matrículas apenas da escola Paulo Roberto
+  # ----------------------------------------------------------
+  
+  escola <- dados %>%
+    
+    filter(
+      CO_ENTIDADE == id_escola_paulo
+    ) %>%
+    
+    group_by(
+      Ano
+    ) %>%
+    
+    summarise(
+      
+      Nao_declarada =
+        sum(QT_MAT_BAS_ND, na.rm = TRUE),
+      
+      Branca =
+        sum(QT_MAT_BAS_BRANCA, na.rm = TRUE),
+      
+      Preta =
+        sum(QT_MAT_BAS_PRETA, na.rm = TRUE),
+      
+      Parda =
+        sum(QT_MAT_BAS_PARDA, na.rm = TRUE),
+      
+      Amarela =
+        sum(QT_MAT_BAS_AMARELA, na.rm = TRUE),
+      
+      Indigena =
+        sum(QT_MAT_BAS_INDIGENA, na.rm = TRUE),
+      
+      .groups = "drop"
+    ) %>%
+    
+    mutate(
+      Agregado = nome_escola
+    )
+  
+  
+  # ----------------------------------------------------------
+  # Formato longo e cálculo dos percentuais
+  # ----------------------------------------------------------
+  
+  bind_rows(
+    escola,
+    rede
+  ) %>%
+    
+    pivot_longer(
+      
+      cols = c(
+        Nao_declarada,
+        Branca,
+        Preta,
+        Parda,
+        Amarela,
+        Indigena
+      ),
+      
+      names_to = "Raca_cor",
+      
+      values_to = "Matriculas"
+    ) %>%
+    
+    group_by(
+      Ano,
+      Agregado
+    ) %>%
+    
+    mutate(
+      
+      Total_matriculas =
+        sum(
+          Matriculas,
+          na.rm = TRUE
+        ),
+      
+      Percentual =
+        if_else(
+          
+          Total_matriculas > 0,
+          
+          100 * Matriculas /
+            Total_matriculas,
+          
+          NA_real_
+        )
+    ) %>%
+    
+    ungroup() %>%
+    
+    mutate(
+      
+      Raca_cor = recode(
+        Raca_cor,
+        Nao_declarada = "Não declarada",
+        Branca = "Branca",
+        Preta = "Preta",
+        Parda = "Parda",
+        Amarela = "Amarela",
+        Indigena = "Indígena"
+      ),
+      
+      Raca_cor = factor(
+        
+        Raca_cor,
+        
+        levels = c(
+          "Branca",
+          "Parda",
+          "Preta",
+          "Amarela",
+          "Indígena",
+          "Não declarada"
+        )
+      ),
+      
+      Percentual =
+        round(
+          Percentual,
+          1
+        )
+    ) %>%
+    
+    select(
+      Ano,
+      Agregado,
+      Raca_cor,
+      Matriculas,
+      Total_matriculas,
+      Percentual
+    ) %>%
+    
+    arrange(
+      Ano,
+      Agregado,
+      Raca_cor
+    )
+}
+
+
+# ============================================================
+# 16. GERAR A BASE DE EVOLUÇÃO RACIAL
+# ============================================================
+
+evolucao_racial <- calcular_composicao_racial(
+  matriculas_vitoria_2007_2025
+)
+
+
+# ============================================================
+# 17. CONFERIR A SOMA DOS PERCENTUAIS
+# ============================================================
+
+conferencia_percentuais <- evolucao_racial %>%
+  
+  group_by(
+    Ano,
+    Agregado
+  ) %>%
+  
+  summarise(
+    
+    Soma_percentual =
+      sum(
+        Percentual,
+        na.rm = TRUE
+      ),
+    
+    Total_matriculas =
+      first(Total_matriculas),
+    
+    .groups = "drop"
+  )
+
+
+print(
+  conferencia_percentuais
+)
+
+
+# Pequenas diferenças de 99,9 ou 100,1 podem ocorrer
+# devido ao arredondamento para uma casa decimal.
+
+
+# ============================================================
+# 18. TABELA COM QUANTIDADES E PERCENTUAIS
+# ============================================================
+
+tabela_comparativa <- evolucao_racial %>%
+  
+  select(
+    Ano,
+    Raca_cor,
+    Agregado,
+    Matriculas,
+    Percentual
+  ) %>%
+  
+  pivot_wider(
+    
+    names_from = Agregado,
+    
+    values_from = c(
+      Matriculas,
+      Percentual
+    ),
+    
+    names_glue =
+      "{.value}_{Agregado}"
+  ) %>%
+  
+  arrange(
+    Ano,
+    Raca_cor
+  )
+
+
+# ============================================================
+# 19. TABELA APENAS COM PERCENTUAIS
+# ============================================================
+
+tabela_percentuais <- evolucao_racial %>%
+  
+  select(
+    Ano,
+    Raca_cor,
+    Agregado,
+    Percentual
+  ) %>%
+  
+  pivot_wider(
+    names_from = Agregado,
+    values_from = Percentual
+  ) %>%
+  
+  arrange(
+    Ano,
+    Raca_cor
+  )
+
+
+# ============================================================
+# 20. TABELA COM ANOS NAS COLUNAS
+# ============================================================
+
+tabela_percentuais_anos <- evolucao_racial %>%
+  
+  select(
+    Agregado,
+    Raca_cor,
+    Ano,
+    Percentual
+  ) %>%
+  
+  pivot_wider(
+    names_from = Ano,
+    values_from = Percentual
+  ) %>%
+  
+  arrange(
+    
+    factor(
+      
+      Agregado,
+      
+      levels = c(
+        nome_escola,
+        nome_rede
+      )
+    ),
+    
+    Raca_cor
+  )
+
+
+# ============================================================
+# 21. DIFERENÇA EM PONTOS PERCENTUAIS
+#
+# Resultado = escola menos rede municipal
+# ============================================================
+
+tabela_diferenca <- evolucao_racial %>%
+  
+  select(
+    Ano,
+    Raca_cor,
+    Agregado,
+    Percentual
+  ) %>%
+  
+  pivot_wider(
+    names_from = Agregado,
+    values_from = Percentual
+  ) %>%
+  
+  mutate(
+    
+    Diferenca_pp =
+      .data[[nome_escola]] -
+      .data[[nome_rede]]
+  ) %>%
+  
+  arrange(
+    Ano,
+    Raca_cor
+  )
+
+
+# Diferença positiva:
+# maior participação percentual na escola Paulo Roberto.
+#
+# Diferença negativa:
+# menor participação percentual na escola Paulo Roberto.
+
+
+# ============================================================
+# 22. EVOLUÇÃO DA POPULAÇÃO NEGRA
+#
+# População negra = estudantes pretos + pardos
+# ============================================================
+
+evolucao_negros <- evolucao_racial %>%
+  
+  filter(
+    Raca_cor %in% c(
+      "Preta",
+      "Parda"
+    )
+  ) %>%
+  
+  group_by(
+    Ano,
+    Agregado
+  ) %>%
+  
+  summarise(
+    
+    Matriculas_negras =
+      sum(
+        Matriculas,
+        na.rm = TRUE
+      ),
+    
+    Total_matriculas =
+      first(Total_matriculas),
+    
+    Percentual_negros =
+      if_else(
+        
+        Total_matriculas > 0,
+        
+        100 * Matriculas_negras /
+          Total_matriculas,
+        
+        NA_real_
+      ),
+    
+    .groups = "drop"
+  ) %>%
+  
+  mutate(
+    
+    Percentual_negros =
+      round(
+        Percentual_negros,
+        1
+      )
+  )
+
+
+# ============================================================
+# 23. VISUALIZAR AS TABELAS
+# ============================================================
+
+View(
+  evolucao_racial
+)
+
+View(
+  tabela_comparativa
+)
+
+View(
+  tabela_percentuais
+)
+
+View(
+  tabela_percentuais_anos
+)
+
+View(
+  tabela_diferenca
+)
+
+View(
+  evolucao_negros
+)
+
+
+# ============================================================
+# 24. GRÁFICO DA COMPOSIÇÃO POR RAÇA/COR
+# ============================================================
+
+grafico_raca <- ggplot(
+  evolucao_racial,
+  aes(
+    x = Ano,
+    y = Percentual,
+    color = Agregado,
+    group = Agregado
+  )
+) +
+  
+  geom_line(
+    linewidth = 1.1,
+    na.rm = TRUE
+  ) +
+  
+  geom_point(
+    size = 2.5,
+    na.rm = TRUE
+  ) +
+  
+  facet_wrap(
+    ~ Raca_cor,
+    scales = "free_y"
+  ) +
+  
+  scale_x_continuous(
+    breaks = sort(
+      unique(
+        evolucao_racial$Ano
+      )
+    )
+  ) +
+  
+  scale_y_continuous(
+    labels = label_number(
+      decimal.mark = ",",
+      suffix = "%"
+    ),
+    expand = expansion(
+      mult = c(
+        0.05,
+        0.12
+      )
+    )
+  ) +
+  
+  labs(
+    title = "Evolução da composição racial das matrículas",
+    subtitle = paste0(
+      nome_escola,
+      " e escolas municipais de Vitória"
+    ),
+    x = "Ano",
+    y = "Percentual das matrículas",
+    color = NULL,
+    caption = "Fonte: Censo Escolar/INEP. Elaboração própria."
+  ) +
+  
+  theme_minimal(
+    base_size = 12
+  ) +
+  
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    plot.title = element_text(
+      face = "bold"
+    )
+  )
+
+grafico_raca
+
+
+# ============================================================
+# 25. GRÁFICO DA PARTICIPAÇÃO DE ESTUDANTES NEGROS
+# ============================================================
+
+grafico_negros <- ggplot(
+  evolucao_negros,
+  aes(
+    x = Ano,
+    y = Percentual_negros,
+    color = Agregado,
+    group = Agregado
+  )
+) +
+  geom_line(
+    linewidth = 1.2,
+    na.rm = TRUE
+  ) +
+  geom_point(
+    size = 3,
+    na.rm = TRUE
+  ) +
+  geom_text(
+    aes(
+      label = paste0(
+        format(
+          Percentual_negros,
+          decimal.mark = ",",
+          nsmall = 1
+        ),
+        "%"
+      )
+    ),
+    vjust = -0.8,
+    size = 3,
+    show.legend = FALSE,
+    check_overlap = TRUE,
+    na.rm = TRUE
+  ) +
+  scale_x_continuous(
+    breaks = sort(
+      unique(evolucao_negros$Ano)
+    )
+  ) +
+  scale_y_continuous(
+    labels = scales::label_number(
+      decimal.mark = ",",
+      suffix = "%"
+    ),
+    expand = expansion(
+      mult = c(0.05, 0.15)
+    )
+  ) +
+  labs(
+    title = "Evolução da participação de estudantes negros",
+    subtitle = paste0(
+      nome_escola,
+      " e escolas municipais de Vitória"
+    ),
+    x = "Ano",
+    y = "Percentual de estudantes pretos e pardos",
+    color = NULL,
+    caption = "Fonte: Censo Escolar/INEP. Elaboração própria."
+  ) +
+  theme_minimal(
+    base_size = 12
+  ) +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    plot.title = element_text(
+      face = "bold"
+    )
+  )
+
+grafico_negros
+
+
+
+##adicionando os Não declarados 
+evolucao_nao_declarados <- evolucao_racial %>%
+  filter(Raca_cor == "Não declarada") %>%
+  select(
+    Ano,
+    Agregado,
+    Percentual_nao_declarado = Percentual
+  )
+
+evolucao_negros_grafico <- evolucao_negros %>%
+  left_join(
+    evolucao_nao_declarados,
+    by = c("Ano", "Agregado")
+  )
+
+
+grafico_negros <- ggplot(
+  evolucao_negros_grafico,
+  aes(
+    x = Ano,
+    color = Agregado
+  )
+) +
+  
+  ## Participação de estudantes negros
+  geom_line(
+    aes(
+      y = Percentual_negros
+    ),
+    linewidth = 1.3
+  ) +
+  
+  geom_point(
+    aes(
+      y = Percentual_negros
+    ),
+    size = 3
+  ) +
+  
+  geom_text(
+    aes(
+      y = Percentual_negros,
+      label = paste0(
+        format(
+          Percentual_negros,
+          decimal.mark = ",",
+          nsmall = 1
+        ),
+        "%"
+      )
+    ),
+    vjust = -0.8,
+    size = 3,
+    show.legend = FALSE,
+    check_overlap = TRUE
+  ) +
+  
+  ## Linha tracejada dos não declarados
+  geom_line(
+    aes(
+      y = Percentual_nao_declarado
+    ),
+    linewidth = 1,
+    linetype = "dashed"
+  ) +
+  
+  geom_point(
+    aes(
+      y = Percentual_nao_declarado
+    ),
+    size = 2,
+    shape = 1
+  ) +
+  
+  scale_x_continuous(
+    breaks = sort(unique(evolucao_negros_grafico$Ano))
+  ) +
+  
+  scale_y_continuous(
+    labels = scales::label_percent(
+      scale = 1
+    )
+  ) +
+  
+  labs(
+    title = "Participação de estudantes negros e percentual de não declarados",
+    subtitle = paste0(
+      nome_escola,
+      " e escolas municipais de Vitória"
+    ),
+    x = "Ano",
+    y = "Percentual das matrículas",
+    color = NULL,
+    caption = "Linha contínua: estudantes pretos e pardos. Linha tracejada: não declarados."
+  ) +
+  
+  theme_minimal(base_size = 12) +
+  
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    plot.title = element_text(face = "bold")
+  )
+
+grafico_negros
+
+
+
+
+
+
+# ============================================================
+# 26. EXPORTAR PARA EXCEL
+# ============================================================
+
+write_xlsx(
+  
+  list(
+    
+    "Base_escolas_2007_2025" =
+      matriculas_vitoria_2007_2025,
+    
+    "Numero_escolas_ano" =
+      numero_escolas_ano,
+    
+    "Escola_Paulo_Roberto" =
+      presenca_escola_paulo,
+    
+    "Evolucao_formato_longo" =
+      evolucao_racial,
+    
+    "Comparacao_quant_percentual" =
+      tabela_comparativa,
+    
+    "Comparacao_percentuais" =
+      tabela_percentuais,
+    
+    "Percentuais_anos_colunas" =
+      tabela_percentuais_anos,
+    
+    "Diferenca_pontos_percentuais" =
+      tabela_diferenca,
+    
+    "Pretos_e_pardos" =
+      evolucao_negros,
+    
+    "Conferencia_percentuais" =
+      conferencia_percentuais
+  ),
+  
+  path = file.path(
+    pasta_microdados,
+    "Evolucao_Raca_Cor_Paulo_Roberto_Vitoria_2007_2025.xlsx"
+  )
+)
+
+
+# ============================================================
+# 27. SALVAR OS GRÁFICOS
+# ============================================================
+
+ggsave(
+  
+  filename = file.path(
+    pasta_microdados,
+    "Evolucao_Composicao_Racial_Paulo_Roberto_Vitoria_2007_2025.png"
+  ),
+  
+  plot =
+    grafico_raca,
+  
+  width = 12,
+  
+  height = 8,
+  
+  dpi = 300
+)
+
+
+ggsave(
+  
+  filename = file.path(
+    pasta_microdados,
+    "Evolucao_Estudantes_Negros_e_ND_Paulo_Roberto_Vitoria_2007_2025.png"
+  ),
+  
+  plot =
+    grafico_negros,
+  
+  width = 11,
+  
+  height = 7,
+  
+  dpi = 300
+)
+
+
+# ============================================================
+# 28. MENSAGEM FINAL
+# ============================================================
+
+message(
+  paste0(
+    "\nProcessamento concluído.\n",
+    "Os resultados foram salvos na pasta:\n",
+    pasta_microdados
+  )
+)
+```
