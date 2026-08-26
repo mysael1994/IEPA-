@@ -1,0 +1,194 @@
+#acessando aprendizagem 9 ano
+# Projeto Rio de Janeiro #
+
+library(basedosdados)
+library(dplyr)
+library(scales)
+library(survey)
+library(convey)
+library(ggplot2)
+library(formattable)
+library(googledrive)
+library(bit64)
+library(janitor)
+library(ggrepel)
+library(tidyr)
+
+# SAEB # 
+
+# Usando base dos dados #
+
+set_billing_id("mahin-381317")
+
+# Dicionario #
+#query <- bdplyr("br_inep_saeb.dicionario")
+#dicionario_Saeb <- bd_collect(query)
+
+# Abrindo base 5 ano EF e Selecionando apenas VI´toria e rede municipal #
+IDEB <- basedosdados::read_sql('SELECT * FROM `basedosdados.br_inep_ideb.escola` WHERE ano =2023')
+colnames(IDEB)
+
+IDEB_RJ <- IDEB %>%
+  filter(sigla_uf == "RJ")
+
+unique(IDEB_RJ$ensino)
+unique(IDEB_RJ$anos_escolares)
+
+table(IDEB_RJ$anos_escolares, useNA = "ifany")
+
+
+IDEB_RJ_EF <- IDEB %>%
+  filter(
+    sigla_uf == "RJ",
+    ensino == "fundamental",
+    anos_escolares %in% c(
+      "iniciais (1-5)",
+      "finais (6-9)"
+    )
+  )
+
+table(IDEB_RJ_EF$anos_escolares)
+
+IDEB_RJ_EF %>%
+  summarise(
+    observacoes = n(),
+    escolas = n_distinct(id_escola),
+    municipios = n_distinct(id_municipio)
+  )
+
+#RANKING ANOS INICIAIS
+ranking_ideb_iniciais <- IDEB_RJ_EF %>%
+  
+  filter(
+    anos_escolares == "iniciais (1-5)",
+    !is.na(ideb)
+  ) %>%
+  
+  group_by(id_municipio) %>%
+  
+  summarise(
+    numero_escolas = n_distinct(id_escola),
+    
+    ideb_medio = mean(
+      ideb,
+      na.rm = TRUE
+    ),
+    
+    ideb_mediano = median(
+      ideb,
+      na.rm = TRUE
+    ),
+    
+    .groups = "drop"
+  ) %>%
+  
+  mutate(
+    ranking = rank(
+      -ideb_medio,
+      ties.method = "min"
+    )
+  ) %>%
+  
+  arrange(ranking)
+
+print(ranking_ideb_iniciais, n = Inf)
+
+#RANKIN FINAIS 
+ranking_ideb_finais <- IDEB_RJ_EF %>%
+  
+  filter(
+    anos_escolares == "finais (6-9)",
+    !is.na(ideb)
+  ) %>%
+  
+  group_by(id_municipio) %>%
+  
+  summarise(
+    numero_escolas = n_distinct(id_escola),
+    
+    ideb_medio = mean(
+      ideb,
+      na.rm = TRUE
+    ),
+    
+    ideb_mediano = median(
+      ideb,
+      na.rm = TRUE
+    ),
+    
+    .groups = "drop"
+  ) %>%
+  
+  mutate(
+    ranking = rank(
+      -ideb_medio,
+      ties.method = "min"
+    )
+  ) %>%
+  
+  arrange(ranking)
+
+print(ranking_ideb_finais, n = Inf)
+
+# ============================================================
+# ENSINO MÉDIO - RIO DE JANEIRO
+# ============================================================
+
+IDEB_RJ_EM <- IDEB %>%
+  filter(
+    sigla_uf == "RJ",
+    ensino == "medio"
+  )
+
+# Diagnóstico
+IDEB_RJ_EM %>%
+  summarise(
+    observacoes = n(),
+    escolas = n_distinct(id_escola),
+    municipios = n_distinct(id_municipio),
+    ideb_validos = sum(!is.na(ideb))
+  )
+
+# ============================================================
+# RANKING IDEB - ENSINO MÉDIO
+# ============================================================
+
+ranking_ideb_medio <- IDEB_RJ_EM %>%
+  
+  filter(
+    !is.na(ideb),
+    !is.na(id_municipio)
+  ) %>%
+  
+  group_by(id_municipio) %>%
+  
+  summarise(
+    
+    numero_escolas = n_distinct(id_escola),
+    
+    ideb_medio = mean(
+      ideb,
+      na.rm = TRUE
+    ),
+    
+    ideb_mediano = median(
+      ideb,
+      na.rm = TRUE
+    ),
+    
+    .groups = "drop"
+  ) %>%
+  
+  mutate(
+    ranking = rank(
+      -ideb_medio,
+      ties.method = "min"
+    )
+  ) %>%
+  
+  arrange(ranking)
+
+print(
+  ranking_ideb_medio,
+  n = Inf
+)
