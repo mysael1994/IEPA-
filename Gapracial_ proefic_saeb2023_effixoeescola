@@ -1,0 +1,461 @@
+#acessando o Ideb por escola 2023
+
+###### Mahin ######
+
+# Projeto Rio de Janeiro #
+
+library(basedosdados)
+library(dplyr)
+library(scales)
+library(survey)
+library(convey)
+library(ggplot2)
+library(formattable)
+library(googledrive)
+library(bit64)
+library(janitor)
+library(ggrepel)
+library(tidyr)
+
+# SAEB # 
+
+# Usando base dos dados #
+
+set_billing_id("mahin-381317")
+
+# Dicionario #
+query <- bdplyr("br_inep_saeb.dicionario")
+dicionario_Saeb <- bd_collect(query)
+
+# Abrindo base 5 ano EF e Selecionando apenas VI´toria e rede municipal #
+IDEB <- basedosdados::read_sql('SELECT * FROM `basedosdados.br_inep_ideb.escola` WHERE ano =2023')
+
+Saeb_5EF <- basedosdados::read_sql('SELECT * FROM `basedosdados.br_inep_saeb.aluno_ef_5ano` WHERE ano =2023')
+colnames(Saeb_5EF)
+
+# Quantidade de escolas nas duas bases
+n_distinct(Saeb_5EF$id_escola)
+n_distinct(IDEB$id_escola)
+
+# Quantas escolas do SAEB aparecem no IDEB
+Saeb_5EF %>%
+  distinct(id_escola) %>%
+  summarise(
+    total_escolas = n(),
+    encontradas_ideb = sum(id_escola %in% IDEB$id_escola),
+    percentual = mean(id_escola %in% IDEB$id_escola) * 100
+  )
+
+IDEB %>%
+  count(id_escola) %>%
+  count(n)
+
+
+unique(Saeb_5EF$raca_cor)
+
+unique(Saeb_5EF$disciplina)
+
+table(Saeb_5EF$raca_cor, useNA = "ifany")
+
+table(Saeb_5EF$disciplina, useNA = "ifany")
+
+Saeb_5EF %>%
+  summarise(
+    n = n(),
+    prof_na = sum(is.na(proficiencia_saeb)),
+    peso_na = sum(is.na(peso_aluno)),
+    raca_na = sum(is.na(raca_cor))
+  )
+
+#categorizando a categoria
+Saeb_5EF <- Saeb_5EF %>%
+  mutate(
+    raca = case_when(
+      raca_cor == "A" ~ "Branco",
+      raca_cor %in% c("B", "C") ~ "Negro",
+      raca_cor == "D" ~ "Amarela",
+      raca_cor == "E" ~ "Indígena",
+      TRUE ~ "ND"
+    )
+  )
+
+#calculando a média ponderada
+media_racial_uf <- Saeb_5EF %>%
+  
+  # Manter apenas negros e brancos
+  filter(
+    raca %in% c("Branco", "Negro"),
+    !is.na(proficiencia_saeb),
+    !is.na(peso_aluno)
+  ) %>%
+  
+  # Média ponderada por UF, disciplina e raça
+  group_by(sigla_uf, disciplina, raca) %>%
+  
+  summarise(
+    n = n(),
+    
+    proficiencia_media = weighted.mean(
+      proficiencia_saeb,
+      peso_aluno,
+      na.rm = TRUE
+    ),
+    
+    .groups = "drop"
+  )
+
+media_racial_uf
+
+#transformando em colunas 
+gap_racial_uf <- media_racial_uf %>%
+  
+  select(
+    sigla_uf,
+    disciplina,
+    raca,
+    n,
+    proficiencia_media
+  ) %>%
+  
+  pivot_wider(
+    names_from = raca,
+    values_from = c(n, proficiencia_media)
+  )
+
+gap_racial_uf <- gap_racial_uf %>%
+  mutate(
+    
+    # Gap em pontos da escala SAEB
+    gap_racial = proficiencia_media_Branco -
+      proficiencia_media_Negro,
+    
+    # Gap percentual em relação à média dos brancos
+    gap_percentual = 
+      (gap_racial / proficiencia_media_Branco) * 100
+  )
+
+#gaping
+tabela_gap_uf <- gap_racial_uf %>%
+  
+  select(
+    sigla_uf,
+    disciplina,
+    proficiencia_media_Branco,
+    proficiencia_media_Negro,
+    gap_racial,
+    gap_percentual
+  ) %>%
+  
+  pivot_wider(
+    names_from = disciplina,
+    values_from = c(
+      proficiencia_media_Branco,
+      proficiencia_media_Negro,
+      gap_racial,
+      gap_percentual
+    )
+  ) %>%
+  
+  arrange(desc(gap_racial_LP))
+
+tabela_gap_uf
+
+#rankiamento
+ranking_gap <- tabela_gap_uf %>%
+  select(
+    sigla_uf,
+    gap_racial_LP,
+    gap_racial_MT,
+    gap_percentual_LP,
+    gap_percentual_MT
+  ) %>%
+  mutate(
+    ranking_LP = rank(-gap_racial_LP, ties.method = "min"),
+    ranking_MT = rank(-gap_racial_MT, ties.method = "min")
+  ) %>%
+  arrange(ranking_LP)
+
+print(ranking_gap, n = 27)
+
+#### Comparando o GAP racial entre alunos brancos que frequentam a mesma escola ####
+base_gap_escola <- Saeb_5EF %>%
+  filter(
+    raca %in% c("Branco", "Negro"),
+    !is.na(proficiencia_saeb),
+    !is.na(peso_aluno),
+    !is.na(id_escola)
+  ) %>%
+  
+  # Identificar se existem negros e brancos
+  # dentro da mesma escola e disciplina
+  group_by(sigla_uf, id_escola, disciplina) %>%
+  filter(n_distinct(raca) == 2) %>%
+  ungroup()
+
+
+base_gap_escola %>%
+  summarise(
+    observacoes = n(),
+    escolas = n_distinct(id_escola),
+    estados = n_distinct(sigla_uf)
+  )
+
+base_gap_escola %>%
+  count(sigla_uf, disciplina, raca) %>%
+  print(n = 108)
+
+#estimando os efeitos fixos 
+#install.packages("fixest")
+library(fixest)
+library(purrr)
+
+estimar_gap_escola <- function(uf, disc) {
+  
+  dados <- base_gap_escola %>%
+    filter(
+      sigla_uf == uf,
+      disciplina == disc
+    ) %>%
+    mutate(
+      negro = ifelse(raca == "Negro", 1, 0)
+    )
+  
+  modelo <- feols(
+    proficiencia_saeb ~ negro | id_escola,
+    weights = ~peso_aluno,
+    cluster = ~id_escola,
+    data = dados
+  )
+  
+  beta <- coef(modelo)["negro"]
+  ep <- se(modelo)["negro"]
+  pvalor <- pvalue(modelo)["negro"]
+  
+  data.frame(
+    sigla_uf = uf,
+    disciplina = disc,
+    gap_intrasescola = -beta,
+    erro_padrao = ep,
+    ic_inferior = -beta - 1.96 * ep,
+    ic_superior = -beta + 1.96 * ep,
+    p_valor = pvalor,
+    n = nobs(modelo),
+    escolas = n_distinct(dados$id_escola)
+  )
+}
+
+#especificação Y = a + bnegro + e ; a absorve tudo aquilo que é comum aos alunos da mesma escola
+#O sinal inverso ajuda a manter o Gapping 
+#realizando o teste so para RS 
+teste_rs <- estimar_gap_escola(
+  uf = "RS",
+  disc = "LP"
+)
+
+teste_rs
+
+modelo_rs_lp <- feols(
+  proficiencia_saeb ~ negro | id_escola,
+  weights = ~peso_aluno,
+  data = base_gap_escola %>%
+    filter(
+      sigla_uf == "RS",
+      disciplina == "LP"
+    ) %>%
+    mutate(
+      negro = ifelse(raca == "Negro", 1, 0)
+    )
+)
+
+summary(modelo_rs_lp)
+#o resultados mostraram que controlando o efeito fixo das  escolas o GAP diminui para 10,9 
+#Quase 50% 
+
+
+
+#ajustando para rodar para os 27 estados
+combinacoes <- expand.grid(
+  sigla_uf = sort(unique(base_gap_escola$sigla_uf)),
+  disciplina = c("LP", "MT"),
+  stringsAsFactors = FALSE
+)
+
+gap_intrasescola <- map2_dfr(
+  combinacoes$sigla_uf,
+  combinacoes$disciplina,
+  estimar_gap_escola
+)
+
+#verificação
+class(gap_intrasescola)
+dim(gap_intrasescola)
+
+library(tibble)
+gap_intrasescola <- as_tibble(gap_intrasescola)
+print(gap_intrasescola, n = 54)
+
+#construindo a tabela definitiva 
+gap_intrasescola_uf <- gap_intrasescola %>%
+  select(
+    sigla_uf,
+    disciplina,
+    gap_intrasescola,
+    erro_padrao,
+    ic_inferior,
+    ic_superior,
+    p_valor
+  ) %>%
+  pivot_wider(
+    names_from = disciplina,
+    values_from = c(
+      gap_intrasescola,
+      erro_padrao,
+      ic_inferior,
+      ic_superior,
+      p_valor
+    )
+  )
+
+#tabela para a comparação 
+comparacao_gap <- tabela_gap_uf %>%
+  select(
+    sigla_uf,
+    gap_racial_LP,
+    gap_racial_MT
+  ) %>%
+  left_join(
+    gap_intrasescola_uf,
+    by = "sigla_uf"
+  ) %>%
+  mutate(
+    
+    # Redução absoluta
+    reducao_LP =
+      gap_racial_LP - gap_intrasescola_LP,
+    
+    reducao_MT =
+      gap_racial_MT - gap_intrasescola_MT,
+    
+    # Redução relativa
+    reducao_percentual_LP =
+      100 * reducao_LP / gap_racial_LP,
+    
+    reducao_percentual_MT =
+      100 * reducao_MT / gap_racial_MT,
+    
+    # Rankings
+    ranking_bruto_LP =
+      rank(-gap_racial_LP, ties.method = "min"),
+    
+    ranking_intrasescola_LP =
+      rank(-gap_intrasescola_LP, ties.method = "min"),
+    
+    ranking_bruto_MT =
+      rank(-gap_racial_MT, ties.method = "min"),
+    
+    ranking_intrasescola_MT =
+      rank(-gap_intrasescola_MT, ties.method = "min")
+  )
+
+#tabela enxuta 
+resultado_gap <- comparacao_gap %>%
+  select(
+    sigla_uf,
+    
+    gap_racial_LP,
+    gap_intrasescola_LP,
+    reducao_percentual_LP,
+    ranking_intrasescola_LP,
+    
+    gap_racial_MT,
+    gap_intrasescola_MT,
+    reducao_percentual_MT,
+    ranking_intrasescola_MT
+  ) %>%
+  arrange(ranking_intrasescola_LP)
+
+print(resultado_gap, n = 27)
+
+
+#adicionando o P valor na tabela - primeiro criando as condoções
+comparacao_gap <- comparacao_gap %>%
+  mutate(
+    significancia_LP_intra = case_when(
+      p_valor_LP < 0.01 ~ "Sim (p < 0,01)",
+      p_valor_LP < 0.05 ~ "Sim (p < 0,05)",
+      TRUE ~ "Não"
+    ),
+    
+    significancia_MT_intra = case_when(
+      p_valor_MT < 0.01 ~ "Sim (p < 0,01)",
+      p_valor_MT < 0.05 ~ "Sim (p < 0,05)",
+      TRUE ~ "Não"
+    )
+  )
+
+#adicionando na tabela 
+resultado_gap <- comparacao_gap %>%
+  select(
+    sigla_uf,
+    
+    gap_racial_LP,
+    gap_intrasescola_LP,
+    significancia_LP_intra,
+    reducao_percentual_LP,
+    ranking_intrasescola_LP,
+    
+    gap_racial_MT,
+    gap_intrasescola_MT,
+    significancia_MT_intra,
+    reducao_percentual_MT,
+    ranking_intrasescola_MT
+  ) %>%
+  arrange(ranking_intrasescola_LP)
+
+print(resultado_gap, n = 27)
+
+#arrendondados os valores 
+resultado_gap <- comparacao_gap %>%
+  select(
+    sigla_uf,
+    
+    gap_racial_LP,
+    gap_intrasescola_LP,
+    significancia_LP_intra,
+    reducao_percentual_LP,
+    ranking_intrasescola_LP,
+    
+    gap_racial_MT,
+    gap_intrasescola_MT,
+    significancia_MT_intra,
+    reducao_percentual_MT,
+    ranking_intrasescola_MT
+  ) %>%
+  
+  mutate(
+    across(
+      c(
+        gap_racial_LP,
+        gap_intrasescola_LP,
+        reducao_percentual_LP,
+        gap_racial_MT,
+        gap_intrasescola_MT,
+        reducao_percentual_MT
+      ),
+      ~ round(.x, 2)
+    )
+  ) %>%
+  
+  arrange(ranking_intrasescola_LP)
+
+print(resultado_gap, n = 27)
+
+#exportando a tabela para o excel
+library(writexl)
+
+write_xlsx(
+  resultado_gap,
+  "resultado_gap_racial_2023.xlsx"
+)
+
+#depois pedi para a IA montar um Mapa interativo com os resultados 
