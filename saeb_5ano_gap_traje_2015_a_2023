@@ -1,0 +1,1496 @@
+###### Mahin ######
+
+# ============================================================
+# TRAJETÓRIA DO GAP RACIAL DE PROFICIÊNCIA
+# 5º ANO DO ENSINO FUNDAMENTAL
+# SAEB 2015, 2017, 2019 e 2023
+#
+# Escolas públicas
+#
+# Gap racial = Branco - Negro
+# Negro = Preto + Pardo
+# ============================================================
+
+
+# ============================================================
+# 0. PACOTES
+# ============================================================
+
+library(basedosdados)
+library(dplyr)
+library(tidyr)
+library(fixest)
+library(purrr)
+library(tibble)
+library(writexl)
+
+
+# ============================================================
+# 1. ACESSANDO A BASE
+# ============================================================
+
+set_billing_id("mahin-381317")
+
+
+anos_analise <- c(
+  2015,
+  2017,
+  2019,
+  2023
+)
+
+
+# ============================================================
+# 2. VERIFICAÇÃO INICIAL DOS ANOS
+# ============================================================
+#
+# Antes de baixar a base completa,
+# verificar se os quatro anos estão disponíveis.
+#
+# ============================================================
+
+verificar_anos <- basedosdados::read_sql(
+  '
+  SELECT
+    ano,
+    COUNT(*) AS n
+    
+  FROM
+    `basedosdados.br_inep_saeb.aluno_ef_5ano`
+    
+  WHERE
+    ano IN (2015, 2017, 2019, 2023)
+    
+  GROUP BY
+    ano
+    
+  ORDER BY
+    ano
+  '
+)
+
+
+print(
+  verificar_anos,
+  n = Inf
+)
+
+
+# ============================================================
+# 3. VERIFICANDO A CODIFICAÇÃO DA REDE
+# ============================================================
+#
+# A codificação muda ao longo da série.
+#
+# Até 2019:
+#
+# 1 = Federal
+# 2 = Estadual
+# 3 = Municipal
+# 4 = Privada
+#
+# 2023:
+#
+# rede = 1 identifica rede pública.
+#
+# ============================================================
+
+verificar_rede <- basedosdados::read_sql(
+  '
+  SELECT
+    ano,
+    rede,
+    COUNT(*) AS n
+    
+  FROM
+    `basedosdados.br_inep_saeb.aluno_ef_5ano`
+    
+  WHERE
+    ano IN (2015, 2017, 2019, 2023)
+    
+  GROUP BY
+    ano,
+    rede
+    
+  ORDER BY
+    ano,
+    rede
+  '
+)
+
+
+print(
+  verificar_rede,
+  n = Inf
+)
+
+
+# ============================================================
+# 4. BAIXANDO A BASE
+#    SOMENTE ESCOLAS PÚBLICAS
+# ============================================================
+#
+# 2015, 2017 e 2019:
+#
+# rede = 1 Federal
+# rede = 2 Estadual
+# rede = 3 Municipal
+#
+# 2023:
+#
+# rede = 1 Pública
+#
+# ============================================================
+
+Saeb_5EF <- basedosdados::read_sql(
+  '
+  SELECT
+    
+    ano,
+    sigla_uf,
+    id_escola,
+    disciplina,
+    raca_cor,
+    peso_aluno,
+    proficiencia_saeb,
+    rede
+    
+  FROM
+    `basedosdados.br_inep_saeb.aluno_ef_5ano`
+    
+  WHERE
+    ano IN (2015, 2017, 2019, 2023)
+    
+    AND (
+      
+      (
+        ano <= 2019
+        AND CAST(rede AS STRING) IN ("1", "2", "3")
+      )
+      
+      OR
+      
+      (
+        ano = 2023
+        AND CAST(rede AS STRING) = "1"
+      )
+      
+    )
+  '
+)
+
+
+# ============================================================
+# 5. VERIFICAÇÕES DA BASE
+# ============================================================
+
+# Observações por ano
+
+Saeb_5EF %>%
+  count(ano) %>%
+  print(n = Inf)
+
+
+# Rede por ano
+
+Saeb_5EF %>%
+  count(
+    ano,
+    rede
+  ) %>%
+  print(n = Inf)
+
+
+# Disciplinas
+
+Saeb_5EF %>%
+  count(
+    ano,
+    disciplina
+  ) %>%
+  print(n = Inf)
+
+
+# Raça/cor
+
+Saeb_5EF %>%
+  count(
+    ano,
+    raca_cor
+  ) %>%
+  print(n = Inf)
+
+
+# Quantidade de UFs e escolas
+
+diagnostico_base <- Saeb_5EF %>%
+  
+  group_by(ano) %>%
+  
+  summarise(
+    
+    observacoes = n(),
+    
+    escolas = n_distinct(
+      id_escola,
+      na.rm = TRUE
+    ),
+    
+    estados = n_distinct(
+      sigla_uf,
+      na.rm = TRUE
+    ),
+    
+    proficiencia_na = sum(
+      is.na(proficiencia_saeb)
+    ),
+    
+    peso_na = sum(
+      is.na(peso_aluno)
+    ),
+    
+    raca_na = sum(
+      is.na(raca_cor)
+    ),
+    
+    .groups = "drop"
+  )
+
+
+print(
+  diagnostico_base,
+  n = Inf
+)
+
+
+# ============================================================
+# 6. CATEGORIZAÇÃO RACIAL
+# ============================================================
+#
+# A = Branco
+# B = Preto
+# C = Pardo
+# D = Amarela
+# E = Indígena
+#
+# Negro = Preto + Pardo
+#
+# ============================================================
+
+Saeb_5EF <- Saeb_5EF %>%
+  
+  mutate(
+    
+    raca = case_when(
+      
+      raca_cor == "A" ~
+        "Branco",
+      
+      raca_cor %in%
+        c("B", "C") ~
+        "Negro",
+      
+      raca_cor == "D" ~
+        "Amarela",
+      
+      raca_cor == "E" ~
+        "Indígena",
+      
+      TRUE ~
+        "ND"
+    )
+  )
+
+
+# ============================================================
+# 7. DIAGNÓSTICO DA CLASSIFICAÇÃO RACIAL
+# ============================================================
+
+Saeb_5EF %>%
+  
+  count(
+    ano,
+    raca
+  ) %>%
+  
+  print(
+    n = Inf
+  )
+
+
+# ============================================================
+# 8. BASE ANALÍTICA
+# ============================================================
+
+base_analise <- Saeb_5EF %>%
+  
+  filter(
+    
+    ano %in%
+      anos_analise,
+    
+    disciplina %in%
+      c("LP", "MT"),
+    
+    raca %in%
+      c("Branco", "Negro"),
+    
+    !is.na(sigla_uf),
+    
+    !is.na(proficiencia_saeb),
+    
+    !is.na(peso_aluno),
+    
+    peso_aluno > 0
+  )
+
+
+# ============================================================
+# 9. DIAGNÓSTICO DA BASE ANALÍTICA
+# ============================================================
+
+diagnostico_analise <- base_analise %>%
+  
+  group_by(
+    ano,
+    disciplina,
+    raca
+  ) %>%
+  
+  summarise(
+    
+    observacoes = n(),
+    
+    escolas = n_distinct(
+      id_escola,
+      na.rm = TRUE
+    ),
+    
+    estados = n_distinct(
+      sigla_uf
+    ),
+    
+    .groups = "drop"
+  )
+
+
+print(
+  diagnostico_analise,
+  n = Inf
+)
+
+
+# ============================================================
+# 10. MÉDIA RACIAL PONDERADA
+#     ANO × UF × DISCIPLINA × RAÇA
+# ============================================================
+
+media_racial_uf <- base_analise %>%
+  
+  group_by(
+    ano,
+    sigla_uf,
+    disciplina,
+    raca
+  ) %>%
+  
+  summarise(
+    
+    n = n(),
+    
+    proficiencia_media =
+      weighted.mean(
+        proficiencia_saeb,
+        peso_aluno,
+        na.rm = TRUE
+      ),
+    
+    .groups = "drop"
+  )
+
+
+print(
+  media_racial_uf,
+  n = Inf
+)
+
+
+# ============================================================
+# 11. TRANSFORMANDO BRANCO E NEGRO EM COLUNAS
+# ============================================================
+
+gap_racial_uf <- media_racial_uf %>%
+  
+  select(
+    ano,
+    sigla_uf,
+    disciplina,
+    raca,
+    n,
+    proficiencia_media
+  ) %>%
+  
+  pivot_wider(
+    
+    names_from = raca,
+    
+    values_from =
+      c(
+        n,
+        proficiencia_media
+      )
+  )
+
+
+# ============================================================
+# 12. CALCULANDO O GAP RACIAL BRUTO
+# ============================================================
+
+gap_racial_uf <- gap_racial_uf %>%
+  
+  mutate(
+    
+    # --------------------------------------------
+    # Gap em pontos na escala SAEB
+    # --------------------------------------------
+    
+    gap_racial =
+      proficiencia_media_Branco -
+      proficiencia_media_Negro,
+    
+    
+    # --------------------------------------------
+    # Gap percentual em relação aos brancos
+    # --------------------------------------------
+    
+    gap_percentual =
+      100 *
+      gap_racial /
+      proficiencia_media_Branco
+  )
+
+
+# ============================================================
+# 13. RESULTADO DO GAP BRUTO POR ANO
+# ============================================================
+
+resultado_gap_bruto <- gap_racial_uf %>%
+  
+  select(
+    
+    ano,
+    sigla_uf,
+    disciplina,
+    
+    proficiencia_media_Branco,
+    proficiencia_media_Negro,
+    
+    gap_racial,
+    gap_percentual
+  ) %>%
+  
+  arrange(
+    ano,
+    disciplina,
+    desc(gap_racial)
+  )
+
+
+print(
+  resultado_gap_bruto,
+  n = Inf
+)
+
+
+# ============================================================
+# 14. BASE PARA O GAP INTRASESCOLA
+# ============================================================
+#
+# Escola entra na análise somente se possuir
+# alunos brancos E negros:
+#
+# - no mesmo ano
+# - na mesma disciplina
+# - na mesma escola
+#
+# ============================================================
+
+base_gap_escola <- base_analise %>%
+  
+  filter(
+    !is.na(id_escola)
+  ) %>%
+  
+  group_by(
+    ano,
+    sigla_uf,
+    id_escola,
+    disciplina
+  ) %>%
+  
+  filter(
+    n_distinct(raca) == 2
+  ) %>%
+  
+  ungroup()
+
+
+# ============================================================
+# 15. DIAGNÓSTICO DA BASE INTRASESCOLA
+# ============================================================
+
+diagnostico_intra <- base_gap_escola %>%
+  
+  group_by(
+    ano,
+    disciplina
+  ) %>%
+  
+  summarise(
+    
+    observacoes = n(),
+    
+    escolas =
+      n_distinct(id_escola),
+    
+    estados =
+      n_distinct(sigla_uf),
+    
+    .groups = "drop"
+  )
+
+
+print(
+  diagnostico_intra,
+  n = Inf
+)
+
+
+# ============================================================
+# 16. FUNÇÃO PARA ESTIMAR O GAP INTRASESCOLA
+# ============================================================
+#
+# Modelo:
+#
+# proficiencia = a_escola + beta*Negro + erro
+#
+# Como negro = 1 para negros,
+# beta representa Negro - Branco.
+#
+# Multiplicamos por -1 para manter:
+#
+# GAP = Branco - Negro
+#
+# ============================================================
+
+estimar_gap_escola <- function(
+    ano_i,
+    uf_i,
+    disc_i
+) {
+  
+  
+  dados <- base_gap_escola %>%
+    
+    filter(
+      
+      ano == ano_i,
+      
+      sigla_uf == uf_i,
+      
+      disciplina == disc_i
+    ) %>%
+    
+    mutate(
+      
+      negro =
+        ifelse(
+          raca == "Negro",
+          1,
+          0
+        )
+    )
+  
+  
+  # ----------------------------------------------------------
+  # Proteção caso não existam observações suficientes
+  # ----------------------------------------------------------
+  
+  if (
+    nrow(dados) == 0 ||
+    n_distinct(dados$id_escola) < 2
+  ) {
+    
+    return(
+      
+      tibble(
+        
+        ano = ano_i,
+        
+        sigla_uf = uf_i,
+        
+        disciplina = disc_i,
+        
+        gap_intrasescola = NA_real_,
+        
+        erro_padrao = NA_real_,
+        
+        ic_inferior = NA_real_,
+        
+        ic_superior = NA_real_,
+        
+        p_valor = NA_real_,
+        
+        n = nrow(dados),
+        
+        escolas =
+          n_distinct(
+            dados$id_escola
+          )
+      )
+    )
+  }
+  
+  
+  # ----------------------------------------------------------
+  # Modelo
+  # ----------------------------------------------------------
+  
+  resultado <- tryCatch(
+    
+    {
+      
+      modelo <- feols(
+        
+        proficiencia_saeb ~ negro |
+          id_escola,
+        
+        weights = ~peso_aluno,
+        
+        cluster = ~id_escola,
+        
+        data = dados
+      )
+      
+      
+      beta <-
+        coef(modelo)["negro"]
+      
+      
+      ep <-
+        se(modelo)["negro"]
+      
+      
+      pvalor <-
+        pvalue(modelo)["negro"]
+      
+      
+      tibble(
+        
+        ano = ano_i,
+        
+        sigla_uf = uf_i,
+        
+        disciplina = disc_i,
+        
+        gap_intrasescola =
+          -beta,
+        
+        erro_padrao =
+          ep,
+        
+        ic_inferior =
+          -beta - 1.96 * ep,
+        
+        ic_superior =
+          -beta + 1.96 * ep,
+        
+        p_valor =
+          pvalor,
+        
+        n =
+          nobs(modelo),
+        
+        escolas =
+          n_distinct(
+            dados$id_escola
+          )
+      )
+      
+    },
+    
+    
+    error = function(e) {
+      
+      tibble(
+        
+        ano = ano_i,
+        
+        sigla_uf = uf_i,
+        
+        disciplina = disc_i,
+        
+        gap_intrasescola = NA_real_,
+        
+        erro_padrao = NA_real_,
+        
+        ic_inferior = NA_real_,
+        
+        ic_superior = NA_real_,
+        
+        p_valor = NA_real_,
+        
+        n = nrow(dados),
+        
+        escolas =
+          n_distinct(
+            dados$id_escola
+          )
+      )
+    }
+  )
+  
+  
+  return(resultado)
+}
+
+
+# ============================================================
+# 17. COMBINAÇÕES
+#     ANO × UF × DISCIPLINA
+# ============================================================
+
+combinacoes <- expand_grid(
+  
+  ano =
+    sort(
+      unique(
+        base_gap_escola$ano
+      )
+    ),
+  
+  sigla_uf =
+    sort(
+      unique(
+        base_gap_escola$sigla_uf
+      )
+    ),
+  
+  disciplina =
+    c("LP", "MT")
+)
+
+
+# ============================================================
+# 18. RODANDO TODOS OS MODELOS
+# ============================================================
+
+gap_intrasescola <- pmap_dfr(
+  
+  combinacoes,
+  
+  function(
+    ano,
+    sigla_uf,
+    disciplina
+  ) {
+    
+    estimar_gap_escola(
+      
+      ano_i = ano,
+      
+      uf_i = sigla_uf,
+      
+      disc_i = disciplina
+    )
+  }
+)
+
+
+print(
+  gap_intrasescola,
+  n = Inf
+)
+
+
+# ============================================================
+# 19. ADICIONANDO SIGNIFICÂNCIA
+# ============================================================
+
+gap_intrasescola <- gap_intrasescola %>%
+  
+  mutate(
+    
+    significancia_intra =
+      case_when(
+        
+        is.na(p_valor) ~
+          NA_character_,
+        
+        p_valor < 0.01 ~
+          "Sim (p < 0,01)",
+        
+        p_valor < 0.05 ~
+          "Sim (p < 0,05)",
+        
+        TRUE ~
+          "Não"
+      )
+  )
+
+
+# ============================================================
+# 20. JUNTANDO GAP BRUTO E GAP INTRASESCOLA
+# ============================================================
+
+resultado_completo <- gap_racial_uf %>%
+  
+  select(
+    
+    ano,
+    sigla_uf,
+    disciplina,
+    
+    proficiencia_media_Branco,
+    proficiencia_media_Negro,
+    
+    gap_racial,
+    gap_percentual
+  ) %>%
+  
+  left_join(
+    
+    gap_intrasescola,
+    
+    by =
+      c(
+        "ano",
+        "sigla_uf",
+        "disciplina"
+      )
+  ) %>%
+  
+  mutate(
+    
+    # --------------------------------------------
+    # Quanto o gap cai ao controlar pela escola?
+    # --------------------------------------------
+    
+    reducao_intrasescola =
+      gap_racial -
+      gap_intrasescola,
+    
+    
+    reducao_percentual_intra =
+      100 *
+      reducao_intrasescola /
+      gap_racial
+  )
+
+
+# ============================================================
+# 21. RESULTADO COMPLETO POR ANO
+# ============================================================
+
+resultado_completo <- resultado_completo %>%
+  
+  arrange(
+    ano,
+    disciplina,
+    desc(gap_racial)
+  )
+
+
+print(
+  resultado_completo,
+  n = Inf,
+  width = Inf
+)
+
+
+# ============================================================
+# 22. TRAJETÓRIA DO GAP RACIAL BRUTO
+# ============================================================
+
+trajetoria_bruto <- resultado_completo %>%
+  
+  select(
+    sigla_uf,
+    disciplina,
+    ano,
+    gap_racial
+  ) %>%
+  
+  pivot_wider(
+    
+    names_from = ano,
+    
+    values_from = gap_racial,
+    
+    names_prefix = "gap_"
+  ) %>%
+  
+  mutate(
+    
+    # ========================================================
+    # VARIAÇÕES ENTRE EDIÇÕES
+    #
+    # positivo = aumentou o gap
+    # negativo = diminuiu o gap
+    # ========================================================
+    
+    variacao_2015_2017 =
+      gap_2017 -
+      gap_2015,
+    
+    
+    variacao_2017_2019 =
+      gap_2019 -
+      gap_2017,
+    
+    
+    variacao_2019_2023 =
+      gap_2023 -
+      gap_2019,
+    
+    
+    # ========================================================
+    # VARIAÇÃO ACUMULADA
+    # ========================================================
+    
+    variacao_2015_2023 =
+      gap_2023 -
+      gap_2015,
+    
+    
+    # ========================================================
+    # VARIAÇÃO PERCENTUAL
+    # ========================================================
+    
+    variacao_percentual_2015_2023 =
+      ifelse(
+        
+        !is.na(gap_2015) &
+          gap_2015 != 0,
+        
+        100 *
+          (
+            gap_2023 -
+              gap_2015
+          ) /
+          gap_2015,
+        
+        NA_real_
+      ),
+    
+    
+    # ========================================================
+    # CLASSIFICAÇÃO DA TRAJETÓRIA
+    # ========================================================
+    
+    trajetoria_2015_2023 =
+      case_when(
+        
+        is.na(
+          variacao_2015_2023
+        ) ~
+          NA_character_,
+        
+        variacao_2015_2023 < 0 ~
+          "Diminuiu",
+        
+        variacao_2015_2023 > 0 ~
+          "Aumentou",
+        
+        TRUE ~
+          "Estável"
+      )
+  )
+
+
+# ============================================================
+# 23. TRAJETÓRIA DO GAP INTRASESCOLA
+# ============================================================
+
+trajetoria_intra <- resultado_completo %>%
+  
+  select(
+    sigla_uf,
+    disciplina,
+    ano,
+    gap_intrasescola
+  ) %>%
+  
+  pivot_wider(
+    
+    names_from = ano,
+    
+    values_from = gap_intrasescola,
+    
+    names_prefix = "gap_intra_"
+  ) %>%
+  
+  mutate(
+    
+    # ========================================================
+    # VARIAÇÕES ENTRE EDIÇÕES
+    # ========================================================
+    
+    variacao_intra_2015_2017 =
+      gap_intra_2017 -
+      gap_intra_2015,
+    
+    
+    variacao_intra_2017_2019 =
+      gap_intra_2019 -
+      gap_intra_2017,
+    
+    
+    variacao_intra_2019_2023 =
+      gap_intra_2023 -
+      gap_intra_2019,
+    
+    
+    # ========================================================
+    # VARIAÇÃO TOTAL
+    # ========================================================
+    
+    variacao_intra_2015_2023 =
+      gap_intra_2023 -
+      gap_intra_2015,
+    
+    
+    # ========================================================
+    # VARIAÇÃO PERCENTUAL
+    # ========================================================
+    
+    variacao_percentual_intra_2015_2023 =
+      ifelse(
+        
+        !is.na(gap_intra_2015) &
+          gap_intra_2015 != 0,
+        
+        100 *
+          (
+            gap_intra_2023 -
+              gap_intra_2015
+          ) /
+          gap_intra_2015,
+        
+        NA_real_
+      ),
+    
+    
+    # ========================================================
+    # CLASSIFICAÇÃO
+    # ========================================================
+    
+    trajetoria_intra_2015_2023 =
+      case_when(
+        
+        is.na(
+          variacao_intra_2015_2023
+        ) ~
+          NA_character_,
+        
+        variacao_intra_2015_2023 < 0 ~
+          "Diminuiu",
+        
+        variacao_intra_2015_2023 > 0 ~
+          "Aumentou",
+        
+        TRUE ~
+          "Estável"
+      )
+  )
+
+
+# ============================================================
+# 24. JUNTANDO AS DUAS TRAJETÓRIAS
+# ============================================================
+
+trajetoria_final <- trajetoria_bruto %>%
+  
+  left_join(
+    
+    trajetoria_intra,
+    
+    by =
+      c(
+        "sigla_uf",
+        "disciplina"
+      )
+  )
+
+
+# ============================================================
+# 25. TABELA FINAL - LÍNGUA PORTUGUESA
+# ============================================================
+
+trajetoria_LP <- trajetoria_final %>%
+  
+  filter(
+    disciplina == "LP"
+  ) %>%
+  
+  select(
+    
+    sigla_uf,
+    
+    # --------------------------------------------------------
+    # GAP BRUTO
+    # --------------------------------------------------------
+    
+    gap_2015,
+    gap_2017,
+    gap_2019,
+    gap_2023,
+    
+    variacao_2015_2017,
+    variacao_2017_2019,
+    variacao_2019_2023,
+    
+    variacao_2015_2023,
+    
+    variacao_percentual_2015_2023,
+    
+    trajetoria_2015_2023,
+    
+    
+    # --------------------------------------------------------
+    # GAP INTRASESCOLA
+    # --------------------------------------------------------
+    
+    gap_intra_2015,
+    gap_intra_2017,
+    gap_intra_2019,
+    gap_intra_2023,
+    
+    variacao_intra_2015_2017,
+    variacao_intra_2017_2019,
+    variacao_intra_2019_2023,
+    
+    variacao_intra_2015_2023,
+    
+    variacao_percentual_intra_2015_2023,
+    
+    trajetoria_intra_2015_2023
+  ) %>%
+  
+  mutate(
+    
+    across(
+      where(is.numeric),
+      ~round(.x, 2)
+    )
+  ) %>%
+  
+  arrange(
+    variacao_intra_2015_2023
+  )
+
+
+print(
+  trajetoria_LP,
+  n = 27,
+  width = Inf
+)
+
+
+# ============================================================
+# 26. TABELA FINAL - MATEMÁTICA
+# ============================================================
+
+trajetoria_MT <- trajetoria_final %>%
+  
+  filter(
+    disciplina == "MT"
+  ) %>%
+  
+  select(
+    
+    sigla_uf,
+    
+    # --------------------------------------------------------
+    # GAP BRUTO
+    # --------------------------------------------------------
+    
+    gap_2015,
+    gap_2017,
+    gap_2019,
+    gap_2023,
+    
+    variacao_2015_2017,
+    variacao_2017_2019,
+    variacao_2019_2023,
+    
+    variacao_2015_2023,
+    
+    variacao_percentual_2015_2023,
+    
+    trajetoria_2015_2023,
+    
+    
+    # --------------------------------------------------------
+    # GAP INTRASESCOLA
+    # --------------------------------------------------------
+    
+    gap_intra_2015,
+    gap_intra_2017,
+    gap_intra_2019,
+    gap_intra_2023,
+    
+    variacao_intra_2015_2017,
+    variacao_intra_2017_2019,
+    variacao_intra_2019_2023,
+    
+    variacao_intra_2015_2023,
+    
+    variacao_percentual_intra_2015_2023,
+    
+    trajetoria_intra_2015_2023
+  ) %>%
+  
+  mutate(
+    
+    across(
+      where(is.numeric),
+      ~round(.x, 2)
+    )
+  ) %>%
+  
+  arrange(
+    variacao_intra_2015_2023
+  )
+
+
+print(
+  trajetoria_MT,
+  n = 27,
+  width = Inf
+)
+
+
+# ============================================================
+# 27. RANKING DA TRAJETÓRIA - LP
+# ============================================================
+#
+# Quanto mais negativa a variação,
+# maior foi a redução do gap.
+#
+# ============================================================
+
+ranking_trajetoria_LP <- trajetoria_LP %>%
+  
+  mutate(
+    
+    ranking_reducao_bruto =
+      rank(
+        variacao_2015_2023,
+        ties.method = "min"
+      ),
+    
+    
+    ranking_reducao_intra =
+      rank(
+        variacao_intra_2015_2023,
+        ties.method = "min"
+      )
+  ) %>%
+  
+  arrange(
+    ranking_reducao_intra
+  )
+
+
+# ============================================================
+# 28. RANKING DA TRAJETÓRIA - MT
+# ============================================================
+
+ranking_trajetoria_MT <- trajetoria_MT %>%
+  
+  mutate(
+    
+    ranking_reducao_bruto =
+      rank(
+        variacao_2015_2023,
+        ties.method = "min"
+      ),
+    
+    
+    ranking_reducao_intra =
+      rank(
+        variacao_intra_2015_2023,
+        ties.method = "min"
+      )
+  ) %>%
+  
+  arrange(
+    ranking_reducao_intra
+  )
+
+
+# ============================================================
+# 29. TABELA RESUMIDA
+#     PRINCIPAL RESULTADO PARA INTERPRETAÇÃO
+# ============================================================
+#
+# Uma linha por UF e disciplina.
+#
+# Mostra:
+#
+# gap em 2015
+# gap em 2023
+# mudança
+# trajetória
+#
+# Tanto bruto quanto intrasescola.
+#
+# ============================================================
+
+resumo_trajetoria <- trajetoria_final %>%
+  
+  select(
+    
+    sigla_uf,
+    disciplina,
+    
+    gap_2015,
+    gap_2023,
+    variacao_2015_2023,
+    trajetoria_2015_2023,
+    
+    gap_intra_2015,
+    gap_intra_2023,
+    variacao_intra_2015_2023,
+    trajetoria_intra_2015_2023
+  ) %>%
+  
+  mutate(
+    
+    across(
+      where(is.numeric),
+      ~round(.x, 2)
+    )
+  ) %>%
+  
+  arrange(
+    disciplina,
+    variacao_intra_2015_2023
+  )
+
+
+print(
+  resumo_trajetoria,
+  n = Inf,
+  width = Inf
+)
+
+
+# ============================================================
+# 30. CONTANDO ESTADOS QUE AUMENTARAM OU DIMINUÍRAM
+# ============================================================
+
+resumo_direcao <- resumo_trajetoria %>%
+  
+  count(
+    disciplina,
+    trajetoria_intra_2015_2023,
+    name = "numero_estados"
+  )
+
+
+print(
+  resumo_direcao,
+  n = Inf
+)
+
+
+# ============================================================
+# 31. BASE COMPLETA PARA EXPORTAÇÃO
+# ============================================================
+
+resultado_completo_export <- resultado_completo %>%
+  
+  mutate(
+    
+    across(
+      
+      c(
+        proficiencia_media_Branco,
+        proficiencia_media_Negro,
+        gap_racial,
+        gap_percentual,
+        gap_intrasescola,
+        erro_padrao,
+        ic_inferior,
+        ic_superior,
+        reducao_intrasescola,
+        reducao_percentual_intra
+      ),
+      
+      ~round(.x, 2)
+    )
+  )
+
+
+# ============================================================
+# 32. EXPORTANDO PARA EXCEL
+# ============================================================
+
+write_xlsx(
+  
+  list(
+    
+    "Resumo_trajetoria" =
+      resumo_trajetoria,
+    
+    "Trajetoria_LP" =
+      trajetoria_LP,
+    
+    "Trajetoria_MT" =
+      trajetoria_MT,
+    
+    "Ranking_LP" =
+      ranking_trajetoria_LP,
+    
+    "Ranking_MT" =
+      ranking_trajetoria_MT,
+    
+    "Gap_por_ano" =
+      resultado_completo_export,
+    
+    "Gap_bruto" =
+      trajetoria_bruto,
+    
+    "Gap_intrasescola" =
+      trajetoria_intra,
+    
+    "Resumo_direcao" =
+      resumo_direcao,
+    
+    "Diagnostico_base" =
+      diagnostico_base,
+    
+    "Diagnostico_analise" =
+      diagnostico_analise,
+    
+    "Diagnostico_intra" =
+      diagnostico_intra
+  ),
+  
+  "trajetoria_gap_racial_5EF_2015_2023.xlsx"
+)
+
+getwd()
+# ============================================================
+# 33. FIM
+# ============================================================
+
+message(
+  "Análise concluída."
+)
+
+message(
+  "Arquivo criado: trajetoria_gap_racial_5EF_2015_2023.xlsx"
+)
