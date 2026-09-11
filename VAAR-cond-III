@@ -1,0 +1,538 @@
+###########################################################################################################
+#              SINTAXE PARA REPRODUÇÃO DOS RESULTADOS DA CONDICIONALIDADE III                             #
+#   A PARTIR DOS MICRODADOS DO SAEB 2019 e 2023 DISPONIBILIZADOS NA SEÇÃO DO FUNDEB DA PÁGINA DO INEP     #
+#                                                                                                         #
+#           Instituto Nacional de Estudos e Pesquisas Educacionais - Anísio Teixeira (INEP)               #
+#                                Diretoria de Estudos Educacionais (DIRED)                                #
+#                             Coordenação-Geral de Estudos Educacionais (CGEE)                            #
+#                   Coordenação de Estudos sobre Financiamento Educacional (CEFE)                         #
+#                                                                                                         #
+#                               Data de produção deste arquivo: 01/08/2025                                #
+#                                                                                                         #
+# Atalho para a página com os dados: https://bit.ly/inep-fundeb                                           #
+# Link do atalho criado em 30/01/2025 - Último acesso em 27/12/2025                                       #
+#                                                                                                         #
+###########################################################################################################
+
+
+#0 - Preparando o R para calcular os indicadores da COND III.
+
+#0.1 libera memória, tira a notação científica e limita a visualização a 6 dígitos
+rm(list = ls()) # Limpa o ambiente
+gc() # Libera memória não utilizada
+options(scipen = 999, digits = 6) #tira notação científica e limita vizualização a 6 dígitos
+
+#0.2 Carrega bibliotecas necessárias para o tratamento dos dados
+if (!requireNamespace("pacman", quietly = TRUE)) install.packages("pacman")
+library(pacman)
+p_load(dplyr, purrr)
+
+
+#0.3 Define algumas funções que serão úteis no tratamento dos dados:
+
+#0.3.1 - Função para carregar os dados do Saeb disponíveis no site do Inep:
+le.saeb <- function(caminho) {
+  read.csv(caminho,  sep = ";", dec = ".", fileEncoding = "latin1", header = TRUE, stringsAsFactors = FALSE)
+}
+
+#0.3.2 - Função para arredondar os valores para 6 casas decimais; 
+round_6 <- function(var) {
+  # Verifica se a variável é numérica ou pode ser convertida para numérica
+  var <- as.numeric(var)
+  # Arredonda para 6 casas decimais se não for missing
+  var <- ifelse(is.na(var), NA, as.numeric(sprintf("%.6f", round(var, 6))))
+  return(var)
+}
+
+#0.3.3 - Função para calcular a proporção de alunos com desempenho adequado, ponderada pelo peso do aluno
+prop_pond <- function(adequado, peso) {
+  round_6(sum(adequado * peso, na.rm = TRUE) / sum(peso, na.rm = TRUE))
+}
+
+
+#1 - Carrega os dados baixados do site do Inep 
+# Observação: É necessário substituir o caminho entre aspas pelo local onde o arquivo foi salvo no seu computador
+
+
+#setwd("C:/Users/Mysael Justino/Desktop/Dissertação/sisu")
+#list.files()
+
+#Dados do SAEB 2019
+SAEB_2019 <- le.saeb("C:/Users/Mysael Justino/Desktop/Dissertação/sisu/base_dados_saeb_2019_VAAR/BASE_DE_DADOS_SAEB_2019_PARA_VAAR_FUNDEB_mask.csv")
+#Dados do SAEB 2023
+SAEB_2023 <- le.saeb("C:/Users/Mysael Justino/Desktop/Dissertação/sisu/base_dados_saeb_2023_VAAR/BASE_DE_DADOS_SAEB_2023_PARA_VAAR_FUNDEB_mask.csv")
+#Tabela com todos os entes
+tabela_entes <- read.csv2("C:/Users/Mysael Justino/Desktop/Dissertação/sisu/tabela_entes_2026.csv", fileEncoding = "latin1", stringsAsFactors = F)
+
+
+#2 - Tratamento dos dados:
+
+#2.1 Salva os dados do Saeb em uma lista para realizar um loop e tratar as duas edições do Saeb em um único código
+anos <- c(2019, 2023)
+dados <- list(SAEB_2019, SAEB_2023)
+
+#2.2 - Codifica as variáveis e reduz as tabelas originais às variáveis necessárias
+for (i in seq_along(anos)) {
+  ano <- anos[i]  
+  SAEB <- dados[[i]]
+  # Cria tabela com proficiência por estudante
+  SAEB_REDUZIDO <- SAEB %>%
+    mutate(
+      # Cria variável indicadora dos estudantes com desempenho inadequado em português
+      adequado_lp = case_when(
+        proficiencia_lp_saeb > 200 & id_serie == 5 ~ 1,
+        proficiencia_lp_saeb > 275 & id_serie == 9 ~ 1,
+        proficiencia_lp_saeb > 300 & id_serie %in% c(12, 13) ~ 1,
+        TRUE ~ 0),
+      # Cria variável indicadora dos estudantes com desempenho inadequado em matemática
+      adequado_mt = case_when(
+        proficiencia_mt_saeb > 225 & id_serie == 5 ~ 1,
+        proficiencia_mt_saeb > 300 & id_serie == 9 ~ 1,
+        proficiencia_mt_saeb > 350 & id_serie %in% c(12, 13) ~ 1,
+        TRUE ~ 0)) %>%
+    # Seleciona apenas variáveis necessárias ao cálculo da Condicionalidade III
+    select(co_ente, id_saeb, peso_aluno, adequado_lp, adequado_mt, ppi, nse_grupo)
+  
+  # Cria os dataframes para cada ano
+  assign(paste0("SAEB_REDUZIDO_", ano), SAEB_REDUZIDO)
+  
+  #Cria tabela com o total de estudantes no SAEB, por ente:
+  TOTAL_ESTUDANTES <- SAEB %>% 
+    group_by(co_ente) %>%
+    summarise(total_estudantes = n()) %>%
+    ungroup() %>%
+    # Adiciona o sufixo do ano a todas as colunas, exceto co_ente
+    rename_with(~ paste0(.x, "_", ano), -co_ente)
+  
+  # Cria os dataframes para cada ano
+  assign(paste0("TOTAL_ESTUDANTES_", ano), TOTAL_ESTUDANTES)
+}
+
+#2.3 - Remove alguns objetos intermediários que não serão utilizados nos próximos passos:
+rm(dados, SAEB, SAEB_2019, SAEB_2023, SAEB_REDUZIDO, TOTAL_ESTUDANTES)
+
+
+#3 - Calcula o indicador de proporção de PPI com desempenho inadequado
+
+#3.1 - Cria lista vazia para receber os arquivos do loop
+IDppi <- list()
+
+#3.2 - Calcula a proporção de PPI com desempenho inadequado
+# Inicia o loop, para calcular o indicador para ambos os anos:
+for (ano in anos) {
+  # Obtém o nome das variáveis da tabela de cada ano
+  input_var <- get(paste0("SAEB_REDUZIDO_", ano))
+  # Inicializa as variáveis em uma nova nova tabela
+  IDppi[[as.character(ano)]] <- input_var %>% 
+    #Seleciona apenas os estudantes que são PPI
+    filter(ppi==1) %>% 
+    group_by(co_ente) %>% #agrupa por co_ente
+    summarise(#Reduz a base apenas as variáveis abaixo, agrupadas por co_ente
+      #Proporção de estudantes com desempenho inadequado em português
+      p_adeq_lp = prop_pond(adequado_lp, peso_aluno),
+      #Proporção de estudantes com desempenho inadequado em matemática
+      p_adeq_mt = prop_pond(adequado_mt, peso_aluno),
+      #Conta a quantidade de estudantes ppi por ente
+      n_estudantes_ppi = n()) %>%
+    ungroup() %>% 
+    # calcula a media da proporção de estudantes ppi com desempenho inadequado em portugues e matematica
+    mutate(
+      p_adeq_ppi = case_when(
+        n_estudantes_ppi < 10 ~ NA_real_, #Imputa missing quando o municipio tem menos de 10 alunos ppi
+        T ~ round_6((p_adeq_lp + p_adeq_mt) / 2))) %>%
+    # Adiciona o sufixo do ano a todas as colunas, exceto co_ente
+    rename_with(~ paste0(.x, "_", ano), -co_ente)  
+}
+
+#3.3 Realiza a junção dos dados de 2019 e 2023, e calcula o indicador
+#da diferença entre a proporção de ambos os anos
+IDppi_2019_2023 <- reduce(IDppi, full_join, by = "co_ente") %>% 
+  mutate(id_ppi = p_adeq_ppi_2023 - p_adeq_ppi_2019)
+
+
+#4 - Calcula o indicador de proporção de estudantes de NSE baixo com desempenho inadequado
+
+#4.1 - Cria lista vazia para receber os arquivos do loop
+IDnse <- list()
+
+#4.2 - Calcula a proporção de PPI com desempenho inadequado
+# Inicia o loop, para calcular o indicador para ambos os anos:
+for (ano in anos) {
+  # Obtém o nome das variáveis da tabela de cada ano
+  input_var <- get(paste0("SAEB_REDUZIDO_", ano))
+  # Inicializa as variáveis em uma nova nova tabela
+  IDnse[[as.character(ano)]] <- input_var %>% 
+    #Seleciona apenas os estudantes que têm informação de NSE válida:
+    filter(!is.na(nse_grupo)) %>%
+    #Conta número de estudantes com informação de NSE válida por co_ente:
+    group_by(co_ente) %>%
+    mutate(n_estudantes_nse = n()) %>%
+    ungroup() %>%
+    #Seleciona apenas os estudantes que são de baixo nível socioeconômico
+    filter(nse_grupo==1) %>%
+    group_by(co_ente) %>% #agrupa por co_ente
+    mutate(
+      #Conta o número de estudantes com NSE baixo;
+      n_estudantes_nsebaixo = n(),
+    ) %>%
+    summarise(#Reduz a base apenas as variáveis abaixo, agrupadas por co_ente
+      n_estudantes_nse = min(n_estudantes_nse),
+      n_estudantes_nsebaixo = min(n_estudantes_nsebaixo),
+      #Proporção de estudantes com desempenho inadequado em português
+      p_adeq_lp = prop_pond(adequado_lp, peso_aluno),
+      #Proporção de estudantes com desempenho inadequado em matemática
+      p_adeq_mt = prop_pond(adequado_mt, peso_aluno),
+      #Conta a quantidade de estudantes de baixo nse por ente
+      n_estudantes_nsebaixo = n()) %>%
+    ungroup() %>% 
+    # calcula a media da proporção de estudantes de baixo nse com desempenho inadequado em portugues e matematica
+    mutate(
+      p_adeq_nse = case_when(
+        n_estudantes_nse < 20 ~ NA_real_, #Imputa missing quando o municipio tem menos de 10 alunos em cada grupo nse
+        T ~ round_6((p_adeq_lp + p_adeq_mt) / 2))) %>%
+    # Adiciona o sufixo do ano a todas as colunas, exceto co_ente
+    rename_with(~ paste0(.x, "_", ano), -co_ente)  
+}
+
+#4.3 Realiza a junção dos dados de 2019 e 2023, e calcula o indicador
+#da diferença entre a proporção de ambos os anos
+IDnse_2019_2023 <- reduce(IDnse, full_join, by = "co_ente") %>% 
+  mutate(id_nse = p_adeq_nse_2023 - p_adeq_nse_2019)
+
+#4.4 - Remove objetos grandes que não serão mais utilizados
+rm(IDnse, IDppi, input_var)
+
+#5 - Calcula o indicador da Condicionalidade III:
+COND3 <- tabela_entes %>% #parte da tabela de todos os entes
+  full_join(IDppi_2019_2023, by = "co_ente")  %>% #Une a tabela com o IDppi e a tabela com o IDnse, e com tabelas de total de estudante por co_ente
+  full_join(IDnse_2019_2023, by = "co_ente") %>%
+  full_join(TOTAL_ESTUDANTES_2019, by = "co_ente") %>%
+  full_join(TOTAL_ESTUDANTES_2023, by = "co_ente") %>%
+  #Seleciona apenas as variáveis nessárias
+  select(-starts_with(c("p_adeq_lp", "p_adeq_mt"))) %>% 
+  #Calcula a média dos estudantes entre 2019 e 2023, para computo das margens de erro:
+  mutate(media_estudantes_2019_2023 = (total_estudantes_2019+total_estudantes_2023)/2) %>%
+  #Calcula a média dos estudantes entre 2019 e 2023, para computo das margens de erro:
+  mutate(id_nse_me = 
+           case_when(
+             media_estudantes_2019_2023 > 10000 & id_nse >= -0.01 & id_nse < 0 ~ 0,
+             media_estudantes_2019_2023 > 1000 & media_estudantes_2019_2023 <= 10000 & id_nse >= -0.025 & id_nse < 0 ~ 0,
+             media_estudantes_2019_2023 > 500 & media_estudantes_2019_2023 <= 1000 & id_nse >= -0.05 & id_nse < 0 ~ 0,
+             media_estudantes_2019_2023 > 200 & media_estudantes_2019_2023 <= 500 & id_nse >= -0.075 & id_nse < 0 ~ 0,
+             media_estudantes_2019_2023 > 100 & media_estudantes_2019_2023 <= 200 & id_nse >= -0.1 & id_nse < 0 ~ 0,
+             media_estudantes_2019_2023 <= 100 & id_nse >= -0.15 & id_nse < 0 ~ 0,
+             T ~ id_nse),
+         id_ppi_me = 
+           case_when(
+             media_estudantes_2019_2023 > 10000 & id_ppi >= -0.01 & id_ppi < 0 ~ 0,
+             media_estudantes_2019_2023 > 1000 & media_estudantes_2019_2023 <= 10000 & id_ppi >= -0.025 & id_ppi < 0 ~ 0,
+             media_estudantes_2019_2023 > 500 & media_estudantes_2019_2023 <= 1000 & id_ppi >= -0.05 & id_ppi < 0 ~ 0,
+             media_estudantes_2019_2023 > 200 & media_estudantes_2019_2023 <= 500 & id_ppi >= -0.075 & id_ppi < 0 ~ 0,
+             media_estudantes_2019_2023 > 100 & media_estudantes_2019_2023 <= 200 & id_ppi >= -0.1 & id_ppi < 0 ~ 0,
+             media_estudantes_2019_2023 <= 100 & id_ppi >= -0.15 & id_ppi < 0 ~ 0, 
+             T ~ id_ppi)
+  ) %>%
+  #inclui teto
+  mutate(id_nse_ajustado = 
+           case_when(
+             p_adeq_nse_2019 >= 0.9 & p_adeq_nse_2023 >= 0.9 & id_nse_me < 0 ~ 0,
+             T ~ id_nse_me),
+         id_ppi_ajustado = 
+           case_when(
+             p_adeq_ppi_2019 >= 0.9 & p_adeq_ppi_2023 >= 0.9 & id_ppi_me < 0 ~ 0,
+             T ~ id_ppi_me)) %>%
+  #inclui dummy para identificar efeito teto
+  mutate(
+    teto_nse = ifelse(id_nse_ajustado != id_nse_me, 1, 0),
+    teto_ppi = ifelse(id_ppi_ajustado != id_ppi_me, 1, 0)
+  ) %>%
+  #Quando tem menos de 20 estudantes com informação de NSE válida, considera que tem menos de 10 no grupo de NSE baixo
+  mutate(n_estudantes_nsebaixo_2019 = case_when(
+    n_estudantes_nse_2019 >= 20 ~ as.character(n_estudantes_nsebaixo_2019),
+    is.na(total_estudantes_2019) ~ NA_character_,
+    T ~ "Menos de 10 estudantes"),
+    n_estudantes_nsebaixo_2023 = case_when(
+      n_estudantes_nse_2023 >= 20 ~ as.character(n_estudantes_nsebaixo_2023),
+      is.na(total_estudantes_2023) ~ NA_character_,
+      T ~ "Menos de 10 estudantes")) %>%
+  #Cria variávei indicadora de habilitação na Condicionalidade III
+  mutate(habilitado_cond3 = 
+           case_when(
+             is.na(id_ppi_ajustado) & is.na(id_nse_ajustado) ~ 1, # se ambos idnse e idppi são missing
+             is.na(id_ppi_ajustado) & id_nse_ajustado >= 0 ~ 1, # se id_ppi é missing e id_nse não é negativo
+             is.na(id_nse_ajustado) & id_ppi_ajustado >= 0 ~ 1, # se id_nse é missing e id_ppi não é negativo
+             id_nse_ajustado >= 0 & id_ppi_ajustado >= 0 ~ 1, # se ambos idnse e idppi não são negativos
+             T ~ 0
+           ))
+
+#6 - Cria tabela para o site do Inep:
+
+#Junta tabela com códigos e nomes de todos os entes 
+#com as tabelas com os indicadores da Condicionalidade III
+tabela_site_inep_cond3 <- COND3 %>%
+  #Cria variáveis:
+  mutate(
+    competencia = 2026,
+    condicionalidade = "III",
+    #Transforma o indicador de habilitação em variável categórica ("Sim ou Não")
+    cumprimento = case_when(
+      habilitado_cond3 == 0 ~ "Não",
+      T ~ "Sim"), 
+    #Cria variável com o motivo da habilitação ou inabilitação 
+    motivo = case_when(
+      cumprimento == "Sim" & is.na(total_estudantes_2019) & is.na(total_estudantes_2023) ~ "Habilitado automaticamente por ausência de dados do Saeb 2019 e Saeb 2023.",
+      cumprimento == "Sim" & is.na(total_estudantes_2019) & !is.na(total_estudantes_2023) ~ "Habilitado automaticamente por ausência de dados do Saeb 2019.",
+      cumprimento == "Sim" & is.na(total_estudantes_2023) & !is.na(total_estudantes_2019) ~ "Habilitado automaticamente por ausência de dados do Saeb 2023.",
+      cumprimento == "Sim" & id_nse > 0 & id_ppi > 0  ~ "Habilitado porque reduziu a desigualdade racial e socioeconômica.",
+      cumprimento == "Sim" & id_nse > 0 & id_ppi_ajustado == 0 & id_ppi!=0
+      ~ "Habilitado porque reduziu a desigualdade socioeconômica e apresentou IDPPI_aj ajustado igual a zero (incluído na margem de erro).",
+      cumprimento == "Sim" & id_ppi > 0 & id_nse_ajustado == 0 & id_nse!=0 
+      ~ "Habilitado porque reduziu a desigualdade racial e apresentou IDNSE_aj ajustado igual a zero (incluído na margem de erro).",
+      cumprimento == "Sim" & id_ppi_ajustado == 0 & id_nse_ajustado == 0 
+      & id_ppi != 0 & id_nse !=0  
+      ~ "Habilitado porque apresentou IDPPI_aj ajustado e IDNSE_aj ajustado iguais a zero (incluído na margem de erro).",
+      cumprimento == "Sim" & id_ppi_ajustado == 0 & id_ppi != 0 & 
+        (n_estudantes_nsebaixo_2019 == "Menos de 10 estudantes" | n_estudantes_nsebaixo_2023 == "Menos de 10 estudantes" |
+           is.na(n_estudantes_nsebaixo_2019) | is.na(n_estudantes_nsebaixo_2019)
+        ) ~ "Habilitado porque apresentou IDPPI_aj ajustado igual a zero (incluído na margem de erro). Não avaliado no IDNSE por insuficiência de dados (N < 10 no grupo).",
+      cumprimento == "Sim" & id_nse_ajustado == 0 & id_nse!= 0 & 
+        (n_estudantes_ppi_2019 < 10 | n_estudantes_ppi_2023 < 10 | 
+           is.na(n_estudantes_ppi_2019) | is.na(n_estudantes_ppi_2023)
+        ) ~ "Habilitado porque apresentou IDNSE_aj ajustado igual a zero (incluído na margem de erro). Não avaliado no IDPPI por insuficiência de dados (N < 10 no grupo).",
+      cumprimento == "Sim" & id_ppi > 0 & (n_estudantes_nsebaixo_2019 == "Menos de 10 estudantes" | n_estudantes_nsebaixo_2023 == "Menos de 10 estudantes" |
+                                             is.na(n_estudantes_nsebaixo_2019) | is.na(n_estudantes_nsebaixo_2019)
+      ) ~ "Habilitado porque reduziu a desigualdade racial. Não avaliado no IDNSE por insuficiência de dados (N < 10 no grupo).",
+      cumprimento == "Sim" & id_nse > 0 & 
+        (n_estudantes_ppi_2019 < 10 | n_estudantes_ppi_2023 < 10 | 
+           is.na(n_estudantes_ppi_2019) | is.na(n_estudantes_ppi_2023)
+        ) ~ "Habilitado porque reduziu a desigualdade socioeconômica. Não avaliado no IDPPI por insuficiência de dados (N < 10 no grupo).",
+      cumprimento == "Sim" & (n_estudantes_nsebaixo_2019 == "Menos de 10 estudantes" | n_estudantes_nsebaixo_2023 == "Menos de 10 estudantes" |
+                                is.na(n_estudantes_nsebaixo_2019) | is.na(n_estudantes_nsebaixo_2019)) &
+        (n_estudantes_ppi_2019 < 10 | n_estudantes_ppi_2023 < 10 | 
+           is.na(n_estudantes_ppi_2019) |is.na(n_estudantes_ppi_2023)
+        ) ~ "Habilitado automaticamente por insuficiência de dados para o cálculo do IDPPI e IDNSE  (N < 10 nos grupos racial e socioeconômico).",
+      cumprimento == "Sim" & (n_estudantes_nsebaixo_2019 == "Menos de 10 estudantes" | n_estudantes_nsebaixo_2023 == "Menos de 10 estudantes" |
+                                is.na(n_estudantes_nsebaixo_2019) | is.na(n_estudantes_nsebaixo_2019)) &
+        id_ppi == 0
+      ~ "Habilitado porque não aumentou a desigualdade racial. Não avaliado no IDNSE por insuficiência de dados (N < 10 no grupo).",
+      cumprimento == "Sim" & (n_estudantes_ppi_2019 < 10 | n_estudantes_ppi_2023 < 10 |
+                                is.na(n_estudantes_ppi_2019) | is.na(n_estudantes_ppi_2023) &
+                                id_nse == 0
+      ) ~ "Habilitado porque não aumentou a desigualdade socioeconômica. Não avaliado no IDPPI por insuficiência de dados (N < 10 no grupo).",
+      id_nse_ajustado < 0 & id_ppi_ajustado < 0 ~ "Não reduziu a desigualdade racial e socioeconômica.",
+      id_nse_ajustado < 0 ~ "Não reduziu a desigualdade socioeconômica.",
+      id_ppi_ajustado < 0 ~ "Não reduziu a desigualdade racial.",
+      cumprimento == "Sim" & id_nse > 0 ~ "Habilitado porque reduziu a desigualdade socioeconômica e não aumentou a desigualdade racial.",
+      cumprimento == "Sim" & id_ppi > 0 ~ "Habilitado porque reduziu a desigualdade racial e não aumentou a desigualdade socioeconômica."),
+    #Cria variáveis para dizer se o ente foi incluido na margem de erro dos indicadores
+    id_ppi_ajustado = case_when(
+      id_ppi_ajustado != id_ppi ~ id_ppi_ajustado,
+      T ~ NA_real_),
+    incluido_margem_ppi = case_when(
+      id_ppi_ajustado == 0 ~ "Sim",
+      T ~ "Não"),
+    id_nse_ajustado = case_when(
+      id_nse_ajustado != id_nse ~ id_nse_ajustado,
+      T ~ NA_real_),
+    incluido_margem_nse = case_when(
+      id_nse_ajustado == 0 ~ "Sim",
+      T ~ "Não")
+  ) %>%
+  #Informa os casos nos quais há menos de 10 estudantes por grupo vulnerável
+  mutate(
+    n_estudantes_ppi_2019 = case_when(
+      n_estudantes_ppi_2019 < 10 ~ "Menos que 10 estudantes",
+      T ~ as.character(n_estudantes_ppi_2019)),
+    n_estudantes_ppi_2023 = case_when(
+      n_estudantes_ppi_2023 < 10 ~ "Menos que 10 estudantes",
+      T ~ as.character(n_estudantes_ppi_2023))
+  ) %>%
+  #Seleciona variáveis que estarão na tabela final
+  select(co_ente, no_ente, competencia, condicionalidade, total_estudantes_2019, 
+         total_estudantes_2023, media_estudantes_2019_2023, n_estudantes_ppi_2019,
+         n_estudantes_ppi_2023, p_adeq_ppi_2019, p_adeq_ppi_2023, id_ppi, id_ppi_ajustado, 
+         incluido_margem_ppi, n_estudantes_nsebaixo_2019, n_estudantes_nsebaixo_2023, 
+         p_adeq_nse_2019, p_adeq_nse_2023, id_nse, id_nse_ajustado, 
+         incluido_margem_nse, cumprimento, motivo) %>%
+  #Renomeia as variáveis para o padrão da tabela do site do Inep
+  rename(CO_ENTE = co_ente,
+         NO_ENTE = no_ente,
+         ANO_FUNDEB = competencia,
+         CONDICIONALIDADE = condicionalidade,
+         NU_EST_SAEB_19 = total_estudantes_2019,
+         NU_EST_SAEB_23 = total_estudantes_2023,
+         NU_EST_MED_SAEB_19_23 = media_estudantes_2019_2023,
+         NU_EST_PPI_SAEB_19 = n_estudantes_ppi_2019,
+         NU_EST_PPI_SAEB_23 = n_estudantes_ppi_2023,
+         PR_ADEQ_PPI_19 = p_adeq_ppi_2019,
+         PR_ADEQ_PPI_23 = p_adeq_ppi_2023,
+         ID_PPI = id_ppi,
+         ID_PPI_AJ = id_ppi_ajustado,
+         ID_PPI_ER = incluido_margem_ppi,
+         NU_EST_NSE_B_SAEB_19 = n_estudantes_nsebaixo_2019,
+         NU_EST_NSE_B_SAEB_23 = n_estudantes_nsebaixo_2023,
+         PR_ADEQ_NSE_B_19 = p_adeq_nse_2019,
+         PR_ADEQ_NSE_B_23 = p_adeq_nse_2023,
+         ID_NSE = id_nse,
+         ID_NSE_AJ = id_nse_ajustado,
+         ID_NSE_ER = incluido_margem_nse,
+         HAB_COND_III = cumprimento,
+         COND_III_MOTIVO = motivo)
+
+prop.table(table(tabela_site_inep_cond3$HAB_COND_III))
+
+#Salva os dados finais em formato CSV
+#write.csv2(tabela_site_inep_cond3, "RESULTADOS_COND_III_VAAR_FUNDEB_2026.csv", row.names = F, fileEncoding = "latin1", na="-")
+
+
+######### APROVEITANDO A CONDICIONALIDADE III  PARA SELECIONAR OS CASOS QUE HOUVE REDUÇÃO #####
+
+# A IDEIA É PASSAR 3 FILTROS 
+#PRIMEIRO PEGAR SO AQUELES QUE PASSARAM PELA CONDICIONALIDADE, OU SEJA, FORAM APROVADOS NO QUESITO REDUZIU A DESIGUALDADE RACIAL
+
+#PRIMEIRO TODOS AQUELES QUE REDUZIRAM A DESIGUALDADE RACIAL 
+
+
+
+# Municípios que efetivamente reduziram a desigualdade racial
+des_redu <- tabela_site_inep_cond3 %>%
+  filter(
+    grepl(
+      "reduziu a desigualdade racial",
+      COND_III_MOTIVO,
+      ignore.case = TRUE
+    ),
+    nchar(as.character(CO_ENTE)) == 7
+  )
+
+
+
+nrow(des_redu)
+nrow(des_redu) / nrow(tabela_site_inep_cond3)
+des_redu %>%
+  count(COND_III_MOTIVO, sort = TRUE)
+
+
+des_redu <- tabela_site_inep_cond3 %>%
+  filter(
+    HAB_COND_III == "Sim",
+    grepl(
+      "^Habilitado porque reduziu a desigualdade racial",
+      COND_III_MOTIVO,
+      ignore.case = TRUE
+    )
+  )
+
+nrow(des_redu)
+nrow(des_redu) / nrow(tabela_site_inep_cond3)
+des_redu %>%
+count(COND_III_MOTIVO, sort = TRUE)
+
+##### Craindo o enredo da história ####
+# ============================================================
+# UNIVERSO: APENAS MUNICÍPIOS
+# ============================================================
+
+municipios <- tabela_site_inep_cond3 %>%
+  filter(nchar(as.character(CO_ENTE)) == 7)
+
+n_municipios <- nrow(municipios)
+
+n_municipios
+
+# 1. MUNICÍPIOS HABILITADOS NA CONDICIONALIDADE III
+# ============================================================
+
+habilitados <- municipios %>%
+  filter(HAB_COND_III == "Sim")
+
+n_habilitados <- nrow(habilitados)
+
+perc_habilitados <- 100 * n_habilitados / n_municipios
+
+table(habilitados$COND_III_MOTIVO)
+# ============================================================
+# 2. REDUZIRAM A DESIGUALDADE RACIAL
+# ============================================================
+
+reduziu_racial <- municipios %>%
+  filter(
+    HAB_COND_III == "Sim",
+    grepl(
+      "^Habilitado porque reduziu a desigualdade racial",
+      COND_III_MOTIVO,
+      ignore.case = TRUE
+    )
+  )
+
+n_racial <- nrow(reduziu_racial)
+
+perc_racial <- 100 * n_racial / n_municipios
+
+table(reduziu_racial$COND_III_MOTIVO)
+# ============================================================
+# 3. REDUZIRAM A DESIGUALDADE SOCIOECONÔMICA
+# ============================================================
+
+reduziu_socio <- municipios %>%
+  filter(
+    HAB_COND_III == "Sim",
+    grepl(
+      "reduziu a desigualdade socioeconômica",
+      COND_III_MOTIVO,
+      ignore.case = TRUE
+    ),
+    !grepl(
+      "^Não reduziu",
+      COND_III_MOTIVO,
+      ignore.case = TRUE
+    )
+  )
+
+n_socio <- nrow(reduziu_socio)
+
+perc_socio <- 100 * n_socio / n_municipios
+
+table(reduziu_socio$COND_III_MOTIVO)
+
+# ============================================================
+# 4. REDUZIRAM AS DUAS DESIGUALDADES
+# ============================================================
+
+reduziu_ambas <- municipios %>%
+  filter(
+    COND_III_MOTIVO ==
+      "Habilitado porque reduziu a desigualdade racial e socioeconômica."
+  )
+
+n_ambas <- nrow(reduziu_ambas)
+
+perc_ambas <- 100 * n_ambas / n_municipios
+
+table(reduziu_ambas$COND_III_MOTIVO)
+
+#tabela de resumos
+resumo_cond3 <- data.frame(
+  Indicador = c(
+    "Habilitados na Condicionalidade III",
+    "Reduziram a desigualdade racial",
+    "Reduziram a desigualdade socioeconômica",
+    "Reduziram ambas as desigualdades"
+  ),
+  
+  Municipios = c(
+    n_habilitados,
+    n_racial,
+    n_socio,
+    n_ambas
+  ),
+  
+  Percentual = round(c(
+    perc_habilitados,
+    perc_racial,
+    perc_socio,
+    perc_ambas
+  ), 1)
+)
+
+resumo_cond3
