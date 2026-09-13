@@ -470,6 +470,9 @@ n_racial <- nrow(reduziu_racial)
 perc_racial <- 100 * n_racial / n_municipios
 
 table(reduziu_racial$COND_III_MOTIVO)
+
+
+colnames(reduziu_racial)
 # ============================================================
 # 3. REDUZIRAM A DESIGUALDADE SOCIOECONÔMICA
 # ============================================================
@@ -536,3 +539,855 @@ resumo_cond3 <- data.frame(
 )
 
 resumo_cond3
+
+#write.csv2(resumo_cond3, "RESULTADOS_COND_III_VAAR_FUNDEB_2026.csv", row.names = F, fileEncoding = "latin1", na="-")
+
+
+#### RANKING DOS MUNICIPIOS ####
+
+# RANKING DA MUDANÇA NA DESIGUALDADE RACIAL
+# Apenas municípios
+# ============================================================
+
+municipios <- tabela_site_inep_cond3 %>%
+  filter(
+    nchar(as.character(CO_ENTE)) == 7,
+    !is.na(ID_PPI)
+  )
+
+
+# ============================================================
+# 30 MUNICÍPIOS QUE MAIS REDUZIRAM A DESIGUALDADE RACIAL
+# ============================================================
+
+top30_reducao_racial <- municipios %>%
+  arrange(desc(ID_PPI)) %>%
+  slice_head(n = 30) %>%
+  select(
+    CO_ENTE,
+    NO_ENTE,
+    ID_PPI,
+    PR_ADEQ_PPI_19,
+    PR_ADEQ_PPI_23,
+    HAB_COND_III,
+    COND_III_MOTIVO
+  )
+
+
+# ============================================================
+# 30 MUNICÍPIOS QUE MAIS AUMENTARAM A DESIGUALDADE RACIAL
+# ============================================================
+
+top30_aumento_racial <- municipios %>%
+  arrange(ID_PPI) %>%
+  slice_head(n = 30) %>%
+  select(
+    CO_ENTE,
+    NO_ENTE,
+    ID_PPI,
+    PR_ADEQ_PPI_19,
+    PR_ADEQ_PPI_23,
+    HAB_COND_III,
+    COND_III_MOTIVO
+  )
+
+
+# Visualizar
+top30_reducao_racial
+top30_aumento_racial
+
+library("writexl")
+write_xlsx(
+  list(
+    "30_maiores_reducoes" = top30_reducao_racial,
+    "30_maiores_aumentos" = top30_aumento_racial
+  ),
+  path = "ranking_desigualdade_racial.xlsx"
+)
+
+
+write_xlsx(
+  reduziu_ambas,
+  "municipios_ambas.xlsx"
+)
+
+##### STAND BY ESTA IDEIA ####
+#ADICIONADO UF
+municipios <- tabela_site_inep_cond3 %>%
+  filter(
+    nchar(as.character(CO_ENTE)) == 7,
+    !is.na(ID_PPI)
+  ) %>%
+  mutate(
+    cod_uf = substr(as.character(CO_ENTE), 1, 2),
+    
+    UF = case_when(
+      cod_uf == "11" ~ "RO",
+      cod_uf == "12" ~ "AC",
+      cod_uf == "13" ~ "AM",
+      cod_uf == "14" ~ "RR",
+      cod_uf == "15" ~ "PA",
+      cod_uf == "16" ~ "AP",
+      cod_uf == "17" ~ "TO",
+      cod_uf == "21" ~ "MA",
+      cod_uf == "22" ~ "PI",
+      cod_uf == "23" ~ "CE",
+      cod_uf == "24" ~ "RN",
+      cod_uf == "25" ~ "PB",
+      cod_uf == "26" ~ "PE",
+      cod_uf == "27" ~ "AL",
+      cod_uf == "28" ~ "SE",
+      cod_uf == "29" ~ "BA",
+      cod_uf == "31" ~ "MG",
+      cod_uf == "32" ~ "ES",
+      cod_uf == "33" ~ "RJ",
+      cod_uf == "35" ~ "SP",
+      cod_uf == "41" ~ "PR",
+      cod_uf == "42" ~ "SC",
+      cod_uf == "43" ~ "RS",
+      cod_uf == "50" ~ "MS",
+      cod_uf == "51" ~ "MT",
+      cod_uf == "52" ~ "GO",
+      cod_uf == "53" ~ "DF",
+      TRUE ~ NA_character_
+    )
+  )
+
+top30_reducao_racial <- municipios %>%
+  arrange(desc(ID_PPI)) %>%
+  slice_head(n = 30) %>%
+  select(
+    CO_ENTE,
+    NO_ENTE,
+    UF,
+    PR_ADEQ_PPI_19,
+    PR_ADEQ_PPI_23,
+    ID_PPI
+  )
+
+top30_aumento_racial <- municipios %>%
+  arrange(ID_PPI) %>%
+  slice_head(n = 30) %>%
+  select(
+    CO_ENTE,
+    NO_ENTE,
+    UF,
+    PR_ADEQ_PPI_19,
+    PR_ADEQ_PPI_23,
+    ID_PPI
+  )
+
+
+#### gerando os Maps ####
+#library(geobr)
+library(sf)
+library(ggplot2)
+#library(dplyr)
+
+
+#Site para baixar as malhas do IBGE https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_municipais/municipio_2022/Brasil/BR/?utm_source=chatgpt.com
+
+#depois de baixar as malhas puxa-las
+mapa_municipios <- st_read(
+  "C:/Users/Mysael Justino/Documents/BR_Municipios_2022/BR_Municipios_2022.shp"
+)
+
+#testepara verificar
+#mapa_municipios
+#colnames(mapa_municipios)
+
+# Malha de todos os municípios brasileiros
+#mapa_municipios <- geobr::read_municipality(
+#  code_muni = "all",
+#  year = 2022,
+#  simplified = TRUE
+#)
+
+# Malha dos estados
+#mapa_estados <- geobr::read_state(
+#  code_state = "all",
+#  year = 2022,
+#  simplified = TRUE
+#)
+
+#mapa_estados <- st_read(
+#  "C:/Users/Mysael Justino/Documents/BR_UF_2022/BR_UF_2022.shp"
+#)
+
+#testes
+#mapa_estados
+#colnames(mapa_estados)
+
+
+#da malha dos minuicipios criando a dos estados
+# 2. CRIAR A MALHA DOS ESTADOS A PARTIR DOS MUNICÍPIOS
+
+
+mapa_estados <- mapa_municipios %>%
+  group_by(SIGLA_UF) %>%
+  summarise()
+
+# 3. MUNICÍPIOS QUE REDUZIRAM A DESIGUALDADE RACIAL
+codigos_reducao <- reduziu_racial %>%
+  transmute(
+    CD_MUN = as.character(CO_ENTE),
+    reduziu = "Reduziu a desigualdade racial"
+  )
+
+# 4. JUNTAR RESULTADOS À MALHA MUNICIPAL
+mapa_racial <- mapa_municipios %>%
+  mutate(
+    CD_MUN = as.character(CD_MUN)
+  ) %>%
+  left_join(
+    codigos_reducao,
+    by = "CD_MUN"
+  ) %>%
+  mutate(
+    reduziu = ifelse(
+      is.na(reduziu),
+      "Demais municípios",
+      reduziu
+    )
+  )
+
+
+#verificando a junção
+table(mapa_racial$reduziu)
+
+
+
+#Esse seria o Mapa 
+mapa_reducao_racial <- ggplot() +
+  
+  # Municípios
+  geom_sf(
+    data = mapa_racial,
+    aes(fill = reduziu),
+    color = NA
+  ) +
+  
+  # Divisas estaduais criadas a partir da mesma malha
+  geom_sf(
+    data = mapa_estados,
+    fill = NA,
+    color = "#3366B0",
+    linewidth = 0.4
+  ) +
+  
+  scale_fill_manual(
+    values = c(
+      "Reduziu a desigualdade racial" = "#20A94A",
+      "Demais municípios" = "#E8E8E8"
+    )
+  ) +
+  
+  labs(
+    title = "Municípios que reduziram a desigualdade racial",
+    subtitle = "Redes municipais de ensino — Condicionalidade III do VAAR",
+    fill = NULL,
+    caption = paste0(
+      "Fonte: Inep — Condicionalidade III do VAAR/Fundeb\n",
+      "Elaboração: Iniciativa Equidade Pra Aprender — Mysael Justino"
+    )
+  ) +
+  
+  theme_void() +
+  
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(
+      size = 18,
+      face = "bold"
+    ),
+    plot.subtitle = element_text(
+      size = 11
+    ),
+    plot.caption = element_text(
+      size = 8,
+      hjust = 1
+    ),
+    legend.text = element_text(
+      size = 10
+    )
+  )
+
+mapa_reducao_racial
+
+
+#baixando o Mapa
+ggsave(
+  "mapa_reducao_desigualdade_racial.png",
+  mapa_reducao_racial,
+  width = 12,
+  height = 9,
+  dpi = 300,
+  bg = "white"
+)
+
+
+#deixando o mapa mais limpo possivel para a IA 
+mapa_reducao_racial <- ggplot() +
+  
+  # Municípios
+  geom_sf(
+    data = mapa_racial,
+    aes(fill = reduziu),
+    color = NA
+  ) +
+  
+  # Divisas estaduais
+  geom_sf(
+    data = mapa_estados,
+    fill = NA,
+    color = "#3366B0",
+    linewidth = 0.45
+  ) +
+  
+  # Cores
+  scale_fill_manual(
+    values = c(
+      "Reduziu a desigualdade racial" = "#20A94A",
+      "Demais municípios" = "#E8E8E8"
+    )
+  ) +
+  
+  # Remove tudo que não seja o mapa
+  theme_void() +
+  
+  theme(
+    legend.position = "none",
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+mapa_reducao_racial
+
+
+#BAIXANDO DO MELHOR JEITO PARA A iA
+ggsave(
+  "mapa_reducao_racial_limpo.png",
+  mapa_reducao_racial,
+  width = 10,
+  height = 9,
+  dpi = 400,
+  bg = "transparent"
+)
+
+#a versoao Aumentada apra os casos que aumentaram
+
+# 3. MUNICÍPIOS QUE AUMENTARAM A DESIGUALDADE RACIAL - Não vou usar isso
+# ============================================================
+
+aumentou_racial <- municipios %>%
+  filter(
+    !is.na(ID_PPI),
+    ID_PPI < 0,
+    ID_PPI_ER == "Não"
+  )
+
+
+# Códigos dos municípios que aumentaram a desigualdade racial
+codigos_aumento <- aumentou_racial %>%
+  transmute(
+    CD_MUN = as.character(CO_ENTE),
+    aumentou = "Aumentou a desigualdade racial"
+  )
+
+
+# ============================================================
+# 4. JUNTAR RESULTADOS À MALHA MUNICIPAL
+# ============================================================
+
+mapa_racial_aumento <- mapa_municipios %>%
+  mutate(
+    CD_MUN = as.character(CD_MUN)
+  ) %>%
+  left_join(
+    codigos_aumento,
+    by = "CD_MUN"
+  ) %>%
+  mutate(
+    aumentou = ifelse(
+      is.na(aumentou),
+      "Demais municípios",
+      aumentou
+    )
+  )
+
+
+mapa_aumento_racial <- ggplot() +
+  
+  # Municípios
+  geom_sf(
+    data = mapa_racial_aumento,
+    aes(fill = aumentou),
+    color = NA
+  ) +
+  
+  # Divisas estaduais
+  geom_sf(
+    data = mapa_estados,
+    fill = NA,
+    color = "#3366B0",
+    linewidth = 0.4
+  ) +
+  
+  # Cores
+  scale_fill_manual(
+    values = c(
+      "Aumentou a desigualdade racial" = "#E59A23",
+      "Demais municípios" = "#E8E8E8"
+    )
+  ) +
+  
+  labs(
+    title = "Municípios que aumentaram a desigualdade racial",
+    subtitle = "Redes municipais de ensino — Condicionalidade III do VAAR",
+    fill = NULL,
+    caption = paste0(
+      "Fonte: Inep — Condicionalidade III do VAAR/Fundeb\n",
+      "Elaboração: Iniciativa Equidade Pra Aprender — Mysael Justino"
+    )
+  ) +
+  
+  theme_void() +
+  
+  theme(
+    legend.position = "bottom",
+    
+    plot.title = element_text(
+      size = 18,
+      face = "bold"
+    ),
+    
+    plot.subtitle = element_text(
+      size = 11
+    ),
+    
+    plot.caption = element_text(
+      size = 8,
+      hjust = 1
+    ),
+    
+    legend.text = element_text(
+      size = 10
+    )
+  )
+
+mapa_aumento_racial
+
+#salvamento
+ggsave(
+  "mapa_aumento_desigualdade_racial.png",
+  mapa_aumento_racial,
+  width = 12,
+  height = 9,
+  dpi = 300,
+  bg = "white"
+)
+
+#versao limpa para a IA 
+mapa_aumento_racial_limpo <- ggplot() +
+  
+  # Municípios
+  geom_sf(
+    data = mapa_racial_aumento,
+    aes(fill = aumentou),
+    color = NA
+  ) +
+  
+  # Divisas estaduais
+  geom_sf(
+    data = mapa_estados,
+    fill = NA,
+    color = "#3366B0",
+    linewidth = 0.45
+  ) +
+  
+  # Cores
+  scale_fill_manual(
+    values = c(
+      "Aumentou a desigualdade racial" = "#E59A23",
+      "Demais municípios" = "#E8E8E8"
+    )
+  ) +
+  
+  # Apenas o mapa
+  theme_void() +
+  
+  theme(
+    legend.position = "none",
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+mapa_aumento_racial_limpo
+
+#DSalavando
+ggsave(
+  "mapa_aumento_racial_limpo.png",
+  mapa_aumento_racial_limpo,
+  width = 10,
+  height = 9,
+  dpi = 400,
+  bg = "transparent"
+)
+
+
+#### O MAPA JUNTANDO OS DOIS ####
+# 1. MUNICÍPIOS QUE REDUZIRAM A DESIGUALDADE RACIAL
+# ============================================================
+
+codigos_reducao <- reduziu_racial %>%
+  transmute(
+    CD_MUN = as.character(CO_ENTE),
+    situacao_racial = "Reduziu a desigualdade racial"
+  )
+
+
+# ============================================================
+# 2. MUNICÍPIOS QUE AUMENTARAM A DESIGUALDADE RACIAL
+#    excluindo os casos absorvidos pela margem de erro
+# ============================================================
+
+aumentou_racial <- municipios %>%
+  filter(
+    !is.na(ID_PPI),
+    ID_PPI < 0,
+    ID_PPI_ER == "Não"
+  )
+
+
+codigos_aumento <- aumentou_racial %>%
+  transmute(
+    CD_MUN = as.character(CO_ENTE),
+    situacao_racial = "Aumentou a desigualdade racial"
+  )
+
+
+# ============================================================
+# 3. JUNTAR OS DOIS GRUPOS
+# ============================================================
+
+classificacao_racial <- bind_rows(
+  codigos_reducao,
+  codigos_aumento
+)
+
+
+# Verificar se algum município apareceu nos dois grupos
+classificacao_racial %>%
+  count(CD_MUN) %>%
+  filter(n > 1)
+
+# 4. JUNTAR À MALHA MUNICIPAL
+# ============================================================
+
+mapa_racial <- mapa_municipios %>%
+  mutate(
+    CD_MUN = as.character(CD_MUN)
+  ) %>%
+  left_join(
+    classificacao_racial,
+    by = "CD_MUN"
+  ) %>%
+  mutate(
+    situacao_racial = ifelse(
+      is.na(situacao_racial),
+      "Sem redução ou aumento identificado",
+      situacao_racial
+    )
+  )
+
+mapa_racial %>%
+  st_drop_geometry() %>%
+  count(situacao_racial) %>%
+  mutate(
+    percentual = round(
+      100 * n / sum(n),
+      1
+    )
+  )
+
+
+mapa_situacao_racial <- ggplot() +
+  
+  # Municípios
+  geom_sf(
+    data = mapa_racial,
+    aes(fill = situacao_racial),
+    color = NA
+  ) +
+  
+  # Divisas estaduais
+  geom_sf(
+    data = mapa_estados,
+    fill = NA,
+    color = "#3366B0",
+    linewidth = 0.4
+  ) +
+  
+  # Cores
+  scale_fill_manual(
+    values = c(
+      "Reduziu a desigualdade racial" =
+        "#20A94A",
+      
+      "Aumentou a desigualdade racial" =
+        "#E59A23",
+      
+      "Sem redução ou aumento identificado" =
+        "#E8E8E8"
+    )
+  ) +
+  
+  labs(
+    title = "Variação da desigualdade racial nos municípios",
+    subtitle = "Redes municipais de ensino — Condicionalidade III do VAAR",
+    fill = NULL,
+    caption = paste0(
+      "Fonte: Inep — Condicionalidade III do VAAR/Fundeb\n",
+      "Elaboração: Iniciativa Equidade Pra Aprender — Mysael Justino"
+    )
+  ) +
+  
+  theme_void() +
+  
+  theme(
+    legend.position = "bottom",
+    
+    plot.title = element_text(
+      size = 18,
+      face = "bold"
+    ),
+    
+    plot.subtitle = element_text(
+      size = 11
+    ),
+    
+    plot.caption = element_text(
+      size = 8,
+      hjust = 1
+    ),
+    
+    legend.text = element_text(
+      size = 10
+    )
+  )
+
+mapa_situacao_racial
+
+#SALVAR
+ggsave(
+  "mapa_situacao_desigualdade_racial.png",
+  mapa_situacao_racial,
+  width = 12,
+  height = 9,
+  dpi = 300,
+  bg = "white"
+)
+
+#VERSÃO LIMPA 
+mapa_situacao_racial_limpo <- ggplot() +
+  
+  geom_sf(
+    data = mapa_racial,
+    aes(fill = situacao_racial),
+    color = NA
+  ) +
+  
+  # Divisas estaduais
+  geom_sf(
+    data = mapa_estados,
+    fill = NA,
+    color = "#3366B0",
+    linewidth = 0.45
+  ) +
+  
+  scale_fill_manual(
+    values = c(
+      "Reduziu a desigualdade racial" =
+        "#20A94A",
+      
+      "Aumentou a desigualdade racial" =
+        "#E59A23",
+      
+      "Sem redução ou aumento identificado" =
+        "#E8E8E8"
+    )
+  ) +
+  
+  theme_void() +
+  
+  theme(
+    legend.position = "none",
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+mapa_situacao_racial_limpo
+#SALAVAR OAA IA 
+ggsave(
+  "mapa_situacao_racial_limpo.png",
+  mapa_situacao_racial_limpo,
+  width = 10,
+  height = 9,
+  dpi = 400,
+  bg = "transparent"
+)
+
+
+# MUNICÍPIOS QUE REDUZIRAM A DESIGUALDADE RACIAL E A DESIGUALDADE SOCIOECONÔMICA
+
+
+# 1. CÓDIGOS DOS MUNICÍPIOS QUE REDUZIRAM AS DUAS DESIGUALDADES
+codigos_reducao_ambas <- reduziu_ambas %>%
+  transmute(
+    CD_MUN = as.character(CO_ENTE),
+    reduziu = "Reduziu as desigualdades racial e socioeconômica"
+  )
+
+
+# 2. JUNTAR RESULTADOS À MALHA MUNICIPAL
+mapa_ambas <- mapa_municipios %>%
+  mutate(
+    CD_MUN = as.character(CD_MUN)
+  ) %>%
+  left_join(
+    codigos_reducao_ambas,
+    by = "CD_MUN"
+  ) %>%
+  mutate(
+    reduziu = ifelse(
+      is.na(reduziu),
+      "Demais municípios",
+      reduziu
+    )
+  )
+
+
+#gerando o maps
+mapa_reducao_ambas <- ggplot() +
+  
+  # Municípios
+  geom_sf(
+    data = mapa_ambas,
+    aes(fill = reduziu),
+    color = NA
+  ) +
+  
+  # Divisas estaduais
+  geom_sf(
+    data = mapa_estados,
+    fill = NA,
+    color = "#3366B0",
+    linewidth = 0.4
+  ) +
+  
+  scale_fill_manual(
+    values = c(
+      "Reduziu as desigualdades racial e socioeconômica" = "#20A94A",
+      "Demais municípios" = "#E8E8E8"
+    )
+  ) +
+  
+  labs(
+    title = "Municípios que reduziram as desigualdades racial e socioeconômica",
+    subtitle = "Redes municipais de ensino — Condicionalidade III do VAAR",
+    fill = NULL,
+    caption = paste0(
+      "Fonte: Inep — Condicionalidade III do VAAR/Fundeb\n",
+      "Elaboração: Iniciativa Equidade Pra Aprender — Mysael Justino"
+    )
+  ) +
+  
+  theme_void() +
+  
+  theme(
+    legend.position = "bottom",
+    
+    plot.title = element_text(
+      size = 18,
+      face = "bold"
+    ),
+    
+    plot.subtitle = element_text(
+      size = 11
+    ),
+    
+    plot.caption = element_text(
+      size = 8,
+      hjust = 1
+    ),
+    
+    legend.text = element_text(
+      size = 10
+    )
+  )
+
+mapa_reducao_ambas
+
+#salavando
+ggsave(
+  "mapa_reducao_desigualdade_racial_socioeconomica.png",
+  mapa_reducao_ambas,
+  width = 12,
+  height = 9,
+  dpi = 300,
+  bg = "white"
+)
+
+#gerando para Ia 
+mapa_reducao_ambas_limpo <- ggplot() +
+  
+  # Municípios
+  geom_sf(
+    data = mapa_ambas,
+    aes(fill = reduziu),
+    color = NA
+  ) +
+  
+  # Divisas estaduais
+  geom_sf(
+    data = mapa_estados,
+    fill = NA,
+    color = "#3366B0",
+    linewidth = 0.45
+  ) +
+  
+  # Cores
+  scale_fill_manual(
+    values = c(
+      "Reduziu as desigualdades racial e socioeconômica" = "#20A94A",
+      "Demais municípios" = "#E8E8E8"
+    )
+  ) +
+  
+  theme_void() +
+  
+  theme(
+    legend.position = "none",
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+mapa_reducao_ambas_limpo
+#salvando
+ggsave(
+  "mapa_reducao_ambas_limpo.png",
+  mapa_reducao_ambas_limpo,
+  width = 10,
+  height = 9,
+  dpi = 400,
+  bg = "transparent"
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
