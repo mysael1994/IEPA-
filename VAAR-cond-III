@@ -1380,14 +1380,554 @@ ggsave(
 )
 
 
+# MAPA ESTADUAL
+# PROPORÇÃO DOS MUNICÍPIOS QUE REDUZIRAM A DESIGUALDADE RACIAL
+#criando os estados
+# 1. CRIAR UF A PARTIR DO CÓDIGO DO MUNICÍPIO
+# ============================================================
+
+municipios <- municipios %>%
+  mutate(
+    cod_uf = substr(as.character(CO_ENTE), 1, 2),
+    
+    UF = case_when(
+      cod_uf == "11" ~ "RO",
+      cod_uf == "12" ~ "AC",
+      cod_uf == "13" ~ "AM",
+      cod_uf == "14" ~ "RR",
+      cod_uf == "15" ~ "PA",
+      cod_uf == "16" ~ "AP",
+      cod_uf == "17" ~ "TO",
+      
+      cod_uf == "21" ~ "MA",
+      cod_uf == "22" ~ "PI",
+      cod_uf == "23" ~ "CE",
+      cod_uf == "24" ~ "RN",
+      cod_uf == "25" ~ "PB",
+      cod_uf == "26" ~ "PE",
+      cod_uf == "27" ~ "AL",
+      cod_uf == "28" ~ "SE",
+      cod_uf == "29" ~ "BA",
+      
+      cod_uf == "31" ~ "MG",
+      cod_uf == "32" ~ "ES",
+      cod_uf == "33" ~ "RJ",
+      cod_uf == "35" ~ "SP",
+      
+      cod_uf == "41" ~ "PR",
+      cod_uf == "42" ~ "SC",
+      cod_uf == "43" ~ "RS",
+      
+      cod_uf == "50" ~ "MS",
+      cod_uf == "51" ~ "MT",
+      cod_uf == "52" ~ "GO",
+      cod_uf == "53" ~ "DF",
+      
+      TRUE ~ NA_character_
+    )
+  )
+
+
+#para o caso que Reduziu
+reduziu_racial <- reduziu_racial %>%
+  mutate(
+    cod_uf = substr(as.character(CO_ENTE), 1, 2),
+    
+    UF = case_when(
+      cod_uf == "11" ~ "RO",
+      cod_uf == "12" ~ "AC",
+      cod_uf == "13" ~ "AM",
+      cod_uf == "14" ~ "RR",
+      cod_uf == "15" ~ "PA",
+      cod_uf == "16" ~ "AP",
+      cod_uf == "17" ~ "TO",
+      
+      cod_uf == "21" ~ "MA",
+      cod_uf == "22" ~ "PI",
+      cod_uf == "23" ~ "CE",
+      cod_uf == "24" ~ "RN",
+      cod_uf == "25" ~ "PB",
+      cod_uf == "26" ~ "PE",
+      cod_uf == "27" ~ "AL",
+      cod_uf == "28" ~ "SE",
+      cod_uf == "29" ~ "BA",
+      
+      cod_uf == "31" ~ "MG",
+      cod_uf == "32" ~ "ES",
+      cod_uf == "33" ~ "RJ",
+      cod_uf == "35" ~ "SP",
+      
+      cod_uf == "41" ~ "PR",
+      cod_uf == "42" ~ "SC",
+      cod_uf == "43" ~ "RS",
+      
+      cod_uf == "50" ~ "MS",
+      cod_uf == "51" ~ "MT",
+      cod_uf == "52" ~ "GO",
+      cod_uf == "53" ~ "DF",
+      
+      TRUE ~ NA_character_
+    )
+  )
+
+# 2. TOTAL DE MUNICÍPIOS POR ESTADO
+
+
+total_por_estado <- municipios %>%
+  count(UF, name = "total_municipios")
 
 
 
+# 3. MUNICÍPIOS QUE REDUZIRAM POR ESTADO
+
+
+reduziram_por_estado <- reduziu_racial %>%
+  count(UF, name = "municipios_reduziram")
+
+
+# 4. JUNTAR E CALCULAR O PERCENTUAL
+
+
+resumo_estados <- total_por_estado %>%
+  left_join(
+    reduziram_por_estado,
+    by = "UF"
+  ) %>%
+  mutate(
+    municipios_reduziram = ifelse(
+      is.na(municipios_reduziram),
+      0,
+      municipios_reduziram
+    ),
+    
+    percentual_reducao =
+      100 * municipios_reduziram / total_municipios
+  ) %>%
+  arrange(desc(percentual_reducao))
+
+#arrendondando
+resumo_estados <- resumo_estados %>%
+  mutate(
+    percentual_reducao = round(percentual_reducao, 1)
+  )
 
 
 
+resumo_estados
+
+#juntando para o Mapa
+mapa_estadual_reducao <- mapa_estados %>%
+  left_join(
+    resumo_estados,
+    by = c("SIGLA_UF" = "UF")
+  )
+
+#adicionando o Rotulo
+
+#este é para deixare a Sigla + %
+#rotulos_estados <- mapa_estadual_reducao %>%
+#  st_point_on_surface() %>%
+#  mutate(
+#    rotulo = paste0(
+#      SIGLA_UF,
+#      "\n",
+#      sprintf("%.1f%%", percentual_reducao)
+#    )
+#  )
+
+#deixando só %
+rotulos_estados <- mapa_estadual_reducao %>%
+  st_point_on_surface() %>%
+  mutate(
+    rotulo = sprintf(
+      "%.1f%%",
+      percentual_reducao
+    )
+  )
+
+
+#O Mapa
+mapa_percentual_reducao <- ggplot() +
+  
+  # Estados
+  geom_sf(
+    data = mapa_estadual_reducao,
+    aes(fill = percentual_reducao),
+    color = "#3366B0",
+    linewidth = 0.5
+  ) +
+  
+  # Escala de cores
+  scale_fill_gradient(
+    low = "#E8F5EB",
+    high = "#20A94A",
+    limits = c(0, 100),
+    breaks = c(0, 20, 40, 60, 80, 100),
+    labels = function(x) paste0(x, "%"),
+    name = "Municípios que\nreduziram (%)"
+  ) +
+  
+  # Rótulos: UF + percentual
+  geom_sf_text(
+    data = rotulos_estados,
+    aes(label = rotulo),
+    color = "#3366B0",
+    size = 3.2,
+    fontface = "bold",
+    lineheight = 0.9
+  ) +
+  
+  labs(
+    title = "Proporção de municípios que reduziram a desigualdade racial, por estado",
+    subtitle = "Percentual em relação ao total de municípios de cada estado",
+    caption = paste0(
+      "Fonte: Inep — Condicionalidade III do VAAR/Fundeb\n",
+      "Elaboração: Iniciativa Equidade Pra Aprender — Mysael Justino"
+    )
+  ) +
+  
+  theme_void() +
+  
+  theme(
+    legend.position = "bottom",
+    
+    plot.title = element_text(
+      size = 18,
+      face = "bold",
+      color = "#3366B0"
+    ),
+    
+    plot.subtitle = element_text(
+      size = 11
+    ),
+    
+    plot.caption = element_text(
+      size = 8,
+      hjust = 1
+    )
+  )
+
+mapa_percentual_reducao
+resumo_estados %>%
+  arrange(desc(percentual_reducao))
+
+# ============================================================
+#Fazendo para os Estados que aumentaram a desigualdade
+aumentou_racial <- municipios %>%
+  filter(
+    !is.na(ID_PPI),
+    ID_PPI < 0,
+    ID_PPI_ER == "Não"
+  )
 
 
 
+# 3. TOTAL DE MUNICÍPIOS POR ESTADO
 
 
+total_por_estado <- municipios %>%
+  count(UF, name = "total_municipios")
+
+
+# 4. MUNICÍPIOS QUE AUMENTARAM POR ESTADO
+
+
+aumentaram_por_estado <- aumentou_racial %>%
+  count(UF, name = "municipios_aumentaram")
+
+
+
+# 5. JUNTAR E CALCULAR O PERCENTUAL
+
+
+resumo_estados_aumento <- total_por_estado %>%
+  left_join(
+    aumentaram_por_estado,
+    by = "UF"
+  ) %>%
+  mutate(
+    municipios_aumentaram = ifelse(
+      is.na(municipios_aumentaram),
+      0,
+      municipios_aumentaram
+    ),
+    
+    percentual_aumento =
+      100 * municipios_aumentaram / total_municipios,
+    
+    percentual_aumento =
+      round(percentual_aumento, 1)
+  ) %>%
+  arrange(desc(percentual_aumento))
+
+
+# Visualizar ranking
+resumo_estados_aumento
+
+
+# 6. JUNTAR À MALHA DOS ESTADOS
+mapa_estadual_aumento <- mapa_estados %>%
+  left_join(
+    resumo_estados_aumento,
+    by = c("SIGLA_UF" = "UF")
+  )
+
+
+# 7. CRIAR RÓTULOS COM SIGLA + PERCENTUAL
+
+
+#rotulos_estados_aumento <- mapa_estadual_aumento %>%
+#  st_point_on_surface() %>%
+#  mutate(
+#    rotulo = paste0(
+#      SIGLA_UF,
+#      "\n",
+#      sprintf("%.1f%%", percentual_aumento)
+#    )
+#  )
+
+#deixando só %
+rotulos_estados_aumento <- mapa_estadual_aumento %>%
+  st_point_on_surface() %>%
+  mutate(
+    rotulo = sprintf(
+      "%.1f%%",
+      percentual_aumento
+    )
+  )
+
+
+# 8. MAPA
+
+mapa_percentual_aumento <- ggplot() +
+  
+  geom_sf(
+    data = mapa_estadual_aumento,
+    aes(fill = percentual_aumento),
+    color = "#3366B0",
+    linewidth = 0.5
+  ) +
+  
+  scale_fill_gradient(
+    low = "#FCEEDB",
+    high = "#E59A23",
+    limits = c(0, 100),
+    breaks = c(0, 20, 40, 60, 80, 100),
+    labels = function(x) paste0(x, "%"),
+    name = "Municípios que\naumentaram (%)"
+  ) +
+  
+  geom_sf_text(
+    data = rotulos_estados_aumento,
+    aes(label = rotulo),
+    color = "#3366B0",
+    size = 3.2,
+    fontface = "bold",
+    lineheight = 0.9
+  ) +
+  
+  labs(
+    title = "Proporção de municípios que aumentaram a desigualdade racial, por estado",
+    subtitle = "Percentual em relação ao total de municípios de cada estado",
+    caption = paste0(
+      "Fonte: Inep — Condicionalidade III do VAAR/Fundeb\n",
+      "Elaboração: Iniciativa Equidade Pra Aprender — Mysael Justino"
+    )
+  ) +
+  
+  theme_void() +
+  
+  theme(
+    legend.position = "bottom",
+    
+    plot.title = element_text(
+      size = 18,
+      face = "bold",
+      color = "#3366B0"
+    ),
+    
+    plot.subtitle = element_text(
+      size = 11
+    ),
+    
+    plot.caption = element_text(
+      size = 8,
+      hjust = 1
+    )
+  )
+
+
+mapa_percentual_aumento
+resumo_estados_aumento %>%
+  arrange(desc(percentual_aumento))
+
+
+######################################
+
+
+# 1. TOP 10 MAIORES REDUÇÕES
+
+
+top_reducao <- tribble(
+  ~municipio, ~UF, ~ID_PPI,
+  "Ibateguara", "AL", 0.713738,
+  "Campina do Simão", "PR", 0.623025,
+  "União dos Palmares", "AL", 0.587236,
+  "São José da Laje", "AL", 0.562046,
+  "Santana do Mundaú", "AL", 0.469553,
+  "Nacip Raydan", "MG", 0.464884,
+  "Honório Serpa", "PR", 0.436497,
+  "Caxambu do Sul", "SC", 0.433507,
+  "Parnaguá", "PI", 0.430759,
+  "Ibiaçá", "RS", 0.416939
+)
+
+
+
+# 2. TOP 10 MAIORES AUMENTOS
+
+
+top_aumento <- tribble(
+  ~municipio, ~UF, ~ID_PPI,
+  "Santa Terezinha", "SC", -0.523553,
+  "Cunha Porã", "SC", -0.494062,
+  "São José do Divino", "MG", -0.481384,
+  "Erval Velho", "SC", -0.478262,
+  "Novo Jardim", "TO", -0.463300,
+  "Anahy", "PR", -0.446963,
+  "Itajá", "GO", -0.438390,
+  "Farol", "PR", -0.437322,
+  "São João do Manteninha", "MG", -0.434891,
+  "Carrancas", "MG", -0.431627
+)
+
+
+
+# 3. JUNTAR AS DUAS BASES
+
+
+ranking_extremos <- bind_rows(
+  
+  top_reducao %>%
+    mutate(grupo = "Maiores reduções"),
+  
+  top_aumento %>%
+    mutate(grupo = "Maiores aumentos")
+  
+) %>%
+  mutate(
+    municipio_uf = paste0(municipio, " (", UF, ")"),
+    
+    grupo = factor(
+      grupo,
+      levels = c(
+        "Maiores reduções",
+        "Maiores aumentos"
+      )
+    )
+  )
+
+# 4. GRÁFICO
+
+
+grafico_extremos <- ggplot(
+  ranking_extremos,
+  aes(
+    x = abs(ID_PPI),
+    y = reorder(municipio_uf, abs(ID_PPI)),
+    fill = grupo
+  )
+) +
+  
+  geom_col(
+    width = 0.68,
+    show.legend = FALSE
+  ) +
+  
+  # Valor no final da barra
+  geom_text(
+    aes(
+      label = sprintf("%.3f", abs(ID_PPI))
+    ),
+    hjust = -0.15,
+    size = 3.5,
+    fontface = "bold",
+    color = "#3366B0"
+  ) +
+  
+  # Um painel para redução e outro para aumento
+  facet_wrap(
+    ~grupo,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  
+  scale_fill_manual(
+    values = c(
+      "Maiores reduções" = "#20A94A",
+      "Maiores aumentos" = "#E59A23"
+    )
+  ) +
+  
+  scale_x_continuous(
+    limits = c(0, 0.80),
+    breaks = seq(0, 0.8, 0.2),
+    expand = expansion(mult = c(0, 0.04))
+  ) +
+  
+  labs(
+    title = "Onde ocorreram as maiores mudanças na desigualdade racial?",
+    subtitle = "10 maiores reduções e 10 maiores aumentos do indicador entre os municípios",
+    x = "Magnitude da variação do indicador (ID_PPI)",
+    y = NULL,
+    caption = paste0(
+      "Fonte: Inep — Condicionalidade III do VAAR/Fundeb\n",
+      "Elaboração: Iniciativa Equidade Pra Aprender — Mysael Justino"
+    )
+  ) +
+  
+  theme_minimal(base_size = 12) +
+  
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    
+    strip.text = element_text(
+      size = 13,
+      face = "bold",
+      color = "#3366B0"
+    ),
+    
+    plot.title = element_text(
+      size = 18,
+      face = "bold",
+      color = "#3366B0"
+    ),
+    
+    plot.subtitle = element_text(
+      size = 11,
+      color = "#555555"
+    ),
+    
+    axis.text.y = element_text(
+      size = 9.5,
+      face = "bold"
+    ),
+    
+    axis.text.x = element_text(
+      size = 9
+    ),
+    
+    axis.title.x = element_text(
+      size = 10
+    ),
+    
+    plot.caption = element_text(
+      size = 8,
+      hjust = 1
+    ),
+    
+    strip.background = element_blank()
+  )
+
+grafico_extremos
